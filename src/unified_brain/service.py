@@ -36,6 +36,7 @@ class BrainService:
         self.interval = self.config.get("interval", 60)
         self._cycle_count = 0
         self._compact_interval = self.config.get("compact_every_n_cycles", 10)
+        self.batch_size = self.config.get("batch_size", 100)
         self.running = False
 
     def add_adapter(self, adapter):
@@ -56,7 +57,7 @@ class BrainService:
                 log.error(f"[{adapter.name}] Poll error: {e}")
 
         # 2. Process unprocessed events through brain
-        events = self.store.get_unprocessed()
+        events = self.store.get_unprocessed(limit=self.batch_size)
         for event in events:
             try:
                 # Build cross-channel context (same project, same author)

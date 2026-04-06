@@ -78,10 +78,12 @@ class BrainAnalyzer:
 
     def _call_claude(self, prompt: str) -> str | None:
         try:
+            import os
+            env = {**os.environ, "CLAUDE_CODE_ENTRYPOINT": "unified-brain"}
             result = subprocess.run(
                 [self.claude_path, "-p", prompt, "--output-format", "text"],
                 capture_output=True, text=True, timeout=self.timeout,
-                env={"CLAUDE_CODE_ENTRYPOINT": "unified-brain"},
+                env=env,
             )
             if result.returncode == 0:
                 return result.stdout.strip()
