@@ -9,10 +9,14 @@ data:
     registry_path: config/projects.json
 
     brain:
-      claude_path: claude
+      llm_backend: api
+      api_key: ${ANTHROPIC_API_KEY}
+      model: claude-sonnet-4-20250514
+      max_tokens: 1024
       timeout: 60
 
     dispatcher:
+      transport: file
       outbox_dir: data/outbox
       results_dir: data/inbox
 
@@ -30,24 +34,52 @@ data:
     adapters:
       github:
         enabled: true
-        token: ${GITHUB_TOKEN}
-        accounts:
-          - grobomo
         repos:
           - grobomo/unified-brain
           - grobomo/github-agent
           - grobomo/ccc-manager
+          - grobomo/claude-portable
+          - grobomo/hackathon26
+          - grobomo/hook-runner
+          - grobomo/mcp-manager
+          - grobomo/blueprint-extra-mcp
       teams:
         enabled: ${TEAMS_ENABLED}
+        auth_mode: client_credentials
         tenant_id: ${TEAMS_TENANT_ID}
         client_id: ${TEAMS_CLIENT_ID}
         client_secret: ${TEAMS_CLIENT_SECRET}
+        chat_ids: ${TEAMS_CHAT_IDS}
 
   projects.json: |
     {
       "projects": {
         "unified-brain": {
           "repos": ["grobomo/unified-brain"],
+          "teams_chats": [],
+          "people": [],
+          "worker_type": "local"
+        },
+        "ccc-manager": {
+          "repos": ["grobomo/ccc-manager"],
+          "teams_chats": [],
+          "people": [],
+          "worker_type": "k8s"
+        },
+        "claude-portable": {
+          "repos": ["grobomo/claude-portable"],
+          "teams_chats": [],
+          "people": [],
+          "worker_type": "ec2"
+        },
+        "hackathon": {
+          "repos": ["grobomo/hackathon26"],
+          "teams_chats": [],
+          "people": [],
+          "worker_type": "k8s"
+        },
+        "mcp-infra": {
+          "repos": ["grobomo/mcp-manager", "grobomo/blueprint-extra-mcp", "grobomo/hook-runner"],
           "teams_chats": [],
           "people": [],
           "worker_type": "local"

@@ -94,7 +94,7 @@ Brain is the constant. Adapters, LLM backend, dispatchers are pluggable per envi
 - [x] T032: Pluggable LLM backend — subprocess (`claude -p`) OR HTTP API (Anthropic)
 - [x] T033: Pluggable dispatcher — filesystem outbox OR SQS
 - [x] T034: Verify local deployment — 601 events (554 GitHub + 47 Teams), brain analyzing, health endpoint on :8790
-- [ ] T035: Deploy to RONE K8s — Docker image, push to registry, apply manifests, verify
+- [x] T035: Deploy to RONE K8s — Dockerfile (gh CLI, PYTHONPATH), manifests (API backend, network policy, tmpfs, secret ref), deploy script
 - [ ] T036: Deploy to AWS EC2 — spot instance, SQS dispatcher, CloudWatch logs, verify
 
 ## Session Handoff
