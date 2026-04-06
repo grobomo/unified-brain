@@ -16,6 +16,7 @@ import unittest
 # Add src to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
+from unified_brain.runner import _deep_merge, _load_config
 from unified_brain.store import EventStore
 from unified_brain.brain import BrainAnalyzer, DISPATCH, LOG, RESPOND, ALERT
 from unified_brain.context import ContextBuilder
@@ -579,6 +580,48 @@ class TestOutboxProtocol(unittest.TestCase):
         self.assertTrue(self.dispatcher.teams_outbox.exists())
         self.assertTrue(self.dispatcher.email_outbox.exists())
         self.assertTrue(self.dispatcher.bridge_dir.exists())
+
+
+class TestConfigOverlay(unittest.TestCase):
+    """Tests for config deep merge and local overlay (T019)."""
+
+    def test_deep_merge_scalars(self):
+        base = {"a": 1, "b": 2}
+        override = {"b": 3, "c": 4}
+        result = _deep_merge(base, override)
+        self.assertEqual(result, {"a": 1, "b": 3, "c": 4})
+
+    def test_deep_merge_nested(self):
+        base = {"adapters": {"github": {"enabled": True}, "teams": {"enabled": False}}}
+        override = {"adapters": {"teams": {"enabled": True, "chat_ids": ["abc"]}}}
+        result = _deep_merge(base, override)
+        self.assertTrue(result["adapters"]["github"]["enabled"])
+        self.assertTrue(result["adapters"]["teams"]["enabled"])
+        self.assertEqual(result["adapters"]["teams"]["chat_ids"], ["abc"])
+
+    def test_deep_merge_does_not_mutate(self):
+        base = {"a": {"x": 1}}
+        override = {"a": {"y": 2}}
+        result = _deep_merge(base, override)
+        self.assertNotIn("y", base["a"])
+        self.assertIn("y", result["a"])
+
+    def test_load_config_with_local_overlay(self):
+        tmpdir = tempfile.mkdtemp()
+        try:
+            base_path = os.path.join(tmpdir, "brain.yaml")
+            local_path = os.path.join(tmpdir, "brain.local.yaml")
+            # Write base config as JSON (yaml may not be installed)
+            with open(base_path.replace(".yaml", ".json"), "w") as f:
+                json.dump({"interval": 60, "adapters": {"teams": {"enabled": False}}}, f)
+            with open(local_path.replace(".yaml", ".json"), "w") as f:
+                json.dump({"adapters": {"teams": {"enabled": True, "chat_ids": ["x"]}}}, f)
+            config = _load_config(base_path.replace(".yaml", ".json"))
+            self.assertEqual(config["interval"], 60)
+            self.assertTrue(config["adapters"]["teams"]["enabled"])
+            self.assertEqual(config["adapters"]["teams"]["chat_ids"], ["x"])
+        finally:
+            shutil.rmtree(tmpdir)
 
 
 if __name__ == "__main__":

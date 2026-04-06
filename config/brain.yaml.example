@@ -38,8 +38,14 @@ registry_path: config/projects.yaml
 adapters:
   github:
     enabled: false
-    account: grobomo
+    accounts:
+      - grobomo
     # repos: []  # empty = discover all
   teams:
     enabled: false
-    # chat_ids: []  # empty = discover via registry
+    # chat_ids:
+    #   - "19:thread-id@thread.v2"
+    # messages_per_poll: 20
+
+# Local overrides: create brain.local.yaml (gitignored) to set
+# secrets like chat_ids without committing them to the repo.
