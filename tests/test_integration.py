@@ -8,6 +8,7 @@ import asyncio
 import json
 import os
 import shutil
+import sqlite3
 import sys
 import tempfile
 import time
@@ -1048,6 +1049,100 @@ class TestActiveRespond(unittest.TestCase):
         teams_files = list(dispatcher.teams_outbox.glob("*.json"))
         self.assertEqual(len(gh_files), 0)
         self.assertEqual(len(teams_files), 0)
+
+
+class TestFeedback(unittest.TestCase):
+    """Tests for feedback loop (T039)."""
+
+    def setUp(self):
+        self.conn = sqlite3.connect(":memory:")
+        from unified_brain.feedback import FeedbackStore
+        self.feedback = FeedbackStore(self.conn)
+
+    def tearDown(self):
+        self.conn.close()
+
+    def test_record_and_summary(self):
+        """Record outcomes and get summary stats."""
+        self.feedback.record("t1", "dispatch", True, "github", "grobomo/repo")
+        self.feedback.record("t2", "dispatch", True, "github", "grobomo/repo")
+        self.feedback.record("t3", "dispatch", False, "github", "grobomo/repo", error="timeout")
+        self.feedback.record("t4", "respond", True, "teams", "19:abc")
+
+        stats = self.feedback.summary(hours=1)
+        self.assertEqual(stats["dispatch"]["total"], 3)
+        self.assertEqual(stats["dispatch"]["success"], 2)
+        self.assertEqual(stats["dispatch"]["failure"], 1)
+        self.assertAlmostEqual(stats["dispatch"]["rate"], 0.67, places=2)
+        self.assertEqual(stats["respond"]["total"], 1)
+        self.assertEqual(stats["respond"]["success"], 1)
+        self.assertEqual(stats["respond"]["rate"], 1.0)
+
+    def test_recent_failures(self):
+        """Recent failures are included in summary."""
+        self.feedback.record("fail-1", "dispatch", False, "github", "r1", error="worker crash")
+        self.feedback.record("fail-2", "respond", False, "teams", "c1", error="HTTP 403")
+        stats = self.feedback.summary(hours=1)
+        failures = stats["recent_failures"]
+        self.assertEqual(len(failures), 2)
+        errors = {f["error"] for f in failures}
+        self.assertIn("worker crash", errors)
+        self.assertIn("HTTP 403", errors)
+
+    def test_channel_stats(self):
+        """Per-channel stats are computed correctly."""
+        self.feedback.record("c1", "dispatch", True, "github", "grobomo/a")
+        self.feedback.record("c2", "dispatch", True, "github", "grobomo/a")
+        self.feedback.record("c3", "dispatch", False, "github", "grobomo/b")
+        channels = self.feedback.channel_stats(hours=1)
+        self.assertEqual(len(channels), 2)
+        a = next(c for c in channels if c["channel"] == "grobomo/a")
+        self.assertEqual(a["total"], 2)
+        self.assertEqual(a["rate"], 1.0)
+
+    def test_empty_summary(self):
+        """Summary with no data returns empty dict."""
+        stats = self.feedback.summary(hours=1)
+        self.assertEqual(stats, {"recent_failures": []})
+
+    def test_context_includes_feedback(self):
+        """ContextBuilder includes feedback stats when feedback store is set."""
+        tmpdir = tempfile.mkdtemp()
+        try:
+            store = EventStore(os.path.join(tmpdir, "test.db"))
+            registry = ProjectRegistry(os.path.join(tmpdir, "projects.yaml"))
+            from unified_brain.feedback import FeedbackStore
+            feedback = FeedbackStore(store.conn)
+            feedback.record("fb-1", "dispatch", True, "github", "grobomo/repo")
+            feedback.record("fb-2", "dispatch", False, "github", "grobomo/repo", error="fail")
+
+            builder = ContextBuilder(store, registry, feedback=feedback)
+            ctx = builder.build({"source": "github", "channel": "grobomo/repo", "author": "bot"})
+            self.assertIsNotNone(ctx.get("feedback"))
+            self.assertIn("dispatch", ctx["feedback"])
+            self.assertEqual(ctx["feedback"]["dispatch"]["total"], 2)
+        finally:
+            store.close()
+            shutil.rmtree(tmpdir)
+
+    def test_brain_prompt_includes_feedback(self):
+        """Brain prompt renders feedback section when stats exist."""
+        brain = BrainAnalyzer({"claude_path": "nonexistent"})
+        event = {"source": "github", "channel": "grobomo/repo",
+                 "event_type": "issue", "author": "bot", "title": "Bug", "body": "broken"}
+        context = {
+            "feedback": {
+                "dispatch": {"total": 10, "success": 8, "failure": 2, "rate": 0.8},
+                "recent_failures": [
+                    {"id": "f1", "action": "dispatch", "source": "github",
+                     "channel": "grobomo/repo", "error": "timeout"},
+                ],
+            },
+        }
+        prompt = brain._build_prompt(event, context)
+        self.assertIn("Recent Outcomes", prompt)
+        self.assertIn("DISPATCH: 8/10", prompt)
+        self.assertIn("timeout", prompt)
 
 
 class TestMetrics(unittest.TestCase):
