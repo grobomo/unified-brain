@@ -80,7 +80,7 @@ Webhook/API        ──→  Three-tier Memory           ──DISPATCH──�
 
 ## Phase 7: Intelligence
 - [x] T025: Improve brain LLM prompt — structured memory context, action guidelines, cross-channel awareness
-- [ ] T026: Add README for public repo
+- [x] T026: Add README for public repo
 
 ## Session Handoff
 All phases complete. PRs #1-10 merged. Service verified working locally.
