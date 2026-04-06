@@ -1,10 +1,15 @@
-interval: 300
+interval: 3
 db_path: data/brain.db
 registry_path: config/projects.json
 
 brain:
+  llm_backend: subprocess
   claude_path: claude
   timeout: 60
+  # For API backend (containers/EC2):
+  # llm_backend: api
+  # api_key: ${ANTHROPIC_API_KEY}
+  # model: claude-sonnet-4-20250514
 
 dispatcher:
   outbox_dir: data/outbox
@@ -24,8 +29,6 @@ context:
 adapters:
   github:
     enabled: true
-    accounts:
-      - grobomo
     repos:
       - grobomo/unified-brain
       - grobomo/github-agent
@@ -37,3 +40,5 @@ adapters:
       - grobomo/blueprint-extra-mcp
   teams:
     enabled: false
+    # Secrets in brain.local.yaml:
+    # tenant_id, client_id, client_secret, chat_ids

@@ -87,22 +87,21 @@ Webhook/API        ──→  Three-tier Memory           ──DISPATCH──�
 - [x] T028: DRY deep_merge — extract to utils.py, used by both runner and registry
 - [x] T029: CI test workflow — GitHub Actions runs pytest on push/PR to main
 
+## Phase 9: Portable Deployment (spec 005)
+Brain is the constant. Adapters, LLM backend, dispatchers are pluggable per environment.
+- [x] T030: Self-contained GitHub adapter — use `gh` CLI directly, no github-agent dependency
+- [x] T031: Self-contained Teams adapter — inline MS Graph calls, token_path for local, client_credentials for containers
+- [x] T032: Pluggable LLM backend — subprocess (`claude -p`) OR HTTP API (Anthropic)
+- [ ] T033: Pluggable dispatcher — filesystem outbox OR SQS
+- [x] T034: Verify local deployment — 601 events (554 GitHub + 47 Teams), brain analyzing, health endpoint on :8790
+- [ ] T035: Deploy to RONE K8s — Docker image, push to registry, apply manifests, verify
+- [ ] T036: Deploy to AWS EC2 — spot instance, SQS dispatcher, CloudWatch logs, verify
+
 ## Session Handoff
-All phases complete. PRs #1-15 merged. CI green (tests + secret scan).
-- All source modules: store, brain, context, memory, dispatcher, service, registry, runner, utils, adapters (github + teams)
-- 48 integration tests passing, CI runs on every push/PR
-- Live run: 331 GitHub events + 47 Teams messages ingested
-- Config overlay: brain.local.yaml + projects.local.json for secrets, gitignored
-- Registry overlay: Teams chat IDs merged from local file, cross-channel context works
-- ccc-manager bridge: config/unified-brain.yaml in ccc-manager, verified working
-- ccc-central archived — all functionality absorbed
-- Adapters: BoundedSet (10K cap) prevents memory leak, DRY parse_timestamp in base
-- Store: author index + filtered queries, no full table scans
-- Scripts: start.sh, stop.sh, status.sh, run.bat, install-service.ps1
-- Multi-env: Dockerfile, K8s manifests (deployment/service/configmap/pvc/kustomization), ${VAR} interpolation in config
-- Brain prompt: structured memory context (project stats, global patterns), action guidelines, cross-channel awareness
-- README: architecture, quickstart, config docs, testing
-- Bug fixed: memory prompt was referencing wrong keys (T027), DRY deep_merge (T028)
-- CI: GitHub Actions — pytest + secret scan on push/PR
-- schtasks needs admin elevation — use `bash scripts/start.sh` to run manually for now
-- All tasks complete. Project is feature-complete. Future: deploy to K8s/EC2, add more channel adapters, tune LLM prompts from real usage.
+PRs #1-15 merged. CI green. Phases 1-8 complete (foundation through hardening).
+Phase 9 in progress — making the brain ACTUALLY FUNCTIONAL by removing all local filesystem deps.
+- Current adapters are broken: they import from github-agent and teams-agent via hardcoded local paths
+- Brain calls `claude -p` subprocess — won't work in containers
+- Dispatcher writes to local filesystem — no SQS option
+- Spec: specs/005-portable-deployment/SPEC.md
+- Next task: T030 — self-contained GitHub adapter using `gh` CLI directly
