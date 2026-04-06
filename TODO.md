@@ -67,13 +67,20 @@ Webhook/API        ──→  Three-tier Memory           ──DISPATCH──�
 - ccc-manager at `_grobomo/ccc-manager/` — task dispatch and worker execution
 - msgraph-lib at `~/Documents/ProjectsCL1/msgraph-lib/` — shared MS Graph token management
 
+## Phase 5: Operational Polish
+- [ ] T018: Scheduled service — use claude-scheduler or schtasks to run brain as persistent background service
+- [ ] T019: Enable Teams adapter — configure chat_ids, test with live Teams data
+- [ ] T020: Connect to ccc-manager bridge — point dispatcher outbox at ccc-manager's bridge input dir
+- [ ] T021: Archive ccc-central — mark as absorbed, redirect to unified-brain + ccc-manager
+
 ## Session Handoff
-Phase 1-4 complete. PR #1 merged. Service running locally.
+Phase 1-4 complete. PRs #1 and #2 merged. Service verified working locally.
 - All source modules: store, brain, context, memory, dispatcher, service, registry, runner, adapters (github + teams)
 - 31 integration tests passing
-- First run: 330 GitHub events ingested from 8 repos, brain analyzed 50 (fallback mode)
-- Service running on port 8790 (health endpoint)
-- Database: data/brain.db with events, FTS, memory tables
-- ccc-manager TODO.md updated with Phase 50 integration tasks (T181-T184)
-- ccc-central should be archived (absorbed into this project + ccc-manager)
-- Next: enable Teams adapter, scheduled service (schtasks), connect to ccc-manager bridge
+- First live run: 330 GitHub events ingested from 8 repos, 50 analyzed (fallback mode), 280 remaining
+- Fixed: env bug in _call_claude (was wiping PATH), batch_size now configurable (100)
+- Hook added: no-hook-bypass.js (prevents Bash from circumventing Write/Edit gates)
+- Hook fixed: instruction-detector.js (strips system-reminder tags before pattern matching)
+- Database: data/brain.db, health on :8790
+- Background process was running (b5rly4aso) but may have been killed by context reset
+- Next: T018 (scheduled service), T019 (Teams), T020 (ccc-manager bridge)
