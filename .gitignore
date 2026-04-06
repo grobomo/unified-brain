@@ -1,0 +1,12 @@
+data/
+state/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+SESSION_STATE.md
+*.egg-info/
+dist/
+build/
+.env
+.mcp.json

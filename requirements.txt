@@ -1,0 +1,2 @@
+# unified-brain dependencies
+# Minimal — stdlib-first design, external deps only when necessary
