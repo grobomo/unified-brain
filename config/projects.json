@@ -1,0 +1,53 @@
+{
+  "projects": {
+    "unified-brain": {
+      "repos": ["grobomo/unified-brain"],
+      "teams_chats": [],
+      "people": [],
+      "worker_type": "local"
+    },
+    "github-agent": {
+      "repos": ["grobomo/github-agent"],
+      "teams_chats": [],
+      "people": [],
+      "worker_type": "local"
+    },
+    "ccc-manager": {
+      "repos": ["grobomo/ccc-manager"],
+      "teams_chats": [],
+      "people": [],
+      "worker_type": "local"
+    },
+    "claude-portable": {
+      "repos": ["grobomo/claude-portable"],
+      "teams_chats": [],
+      "people": [],
+      "worker_type": "ec2"
+    },
+    "hackathon26": {
+      "repos": ["grobomo/hackathon26", "grobomo/boothapp", "grobomo/boothapp-bridge"],
+      "teams_chats": [],
+      "people": [],
+      "worker_type": "k8s",
+      "k8s_namespace": "hackathon"
+    },
+    "hook-runner": {
+      "repos": ["grobomo/hook-runner"],
+      "teams_chats": [],
+      "people": [],
+      "worker_type": "local"
+    },
+    "mcp-manager": {
+      "repos": ["grobomo/mcp-manager"],
+      "teams_chats": [],
+      "people": [],
+      "worker_type": "local"
+    },
+    "blueprint-extra-mcp": {
+      "repos": ["grobomo/blueprint-extra-mcp"],
+      "teams_chats": [],
+      "people": [],
+      "worker_type": "local"
+    }
+  }
+}

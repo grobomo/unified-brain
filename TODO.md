@@ -68,11 +68,12 @@ Webhook/API        ──→  Three-tier Memory           ──DISPATCH──�
 - msgraph-lib at `~/Documents/ProjectsCL1/msgraph-lib/` — shared MS Graph token management
 
 ## Session Handoff
-Phase 1-4 mostly complete. PR #1 open. Branch: 001-T001-project-foundation.
+Phase 1-4 complete. PR #1 merged. Service running locally.
 - All source modules: store, brain, context, memory, dispatcher, service, registry, runner, adapters (github + teams)
 - 31 integration tests passing
-- Runner: CLI entry point, process guard, heartbeat, health endpoint, circuit breaker, log rotation
-- PR: https://github.com/grobomo/unified-brain/pull/1
+- First run: 330 GitHub events ingested from 8 repos, brain analyzed 50 (fallback mode)
+- Service running on port 8790 (health endpoint)
+- Database: data/brain.db with events, FTS, memory tables
 - ccc-manager TODO.md updated with Phase 50 integration tasks (T181-T184)
 - ccc-central should be archived (absorbed into this project + ccc-manager)
-- Remaining: T016 (multi-environment — K8s/EC2 configs), then merge PR #1
+- Next: enable Teams adapter, scheduled service (schtasks), connect to ccc-manager bridge
