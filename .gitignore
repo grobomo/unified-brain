@@ -10,3 +10,6 @@ dist/
 build/
 .env
 .mcp.json
+*.local.yaml
+*.local.yml
+*.local.json

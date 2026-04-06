@@ -200,19 +200,48 @@ async def run_service(config: dict, once: bool = False,
         logger.info("Stopped")
 
 
-def _load_config(path: str) -> dict:
-    """Load config from YAML or JSON."""
-    p = Path(path)
-    if not p.exists():
+def _load_yaml_or_json(path: Path) -> dict:
+    """Load a single YAML or JSON file."""
+    if not path.exists():
         return {}
-    text = p.read_text()
-    if p.suffix in (".yaml", ".yml"):
+    text = path.read_text()
+    if path.suffix in (".yaml", ".yml"):
         try:
             import yaml
             return yaml.safe_load(text) or {}
         except ImportError:
             logger.warning("pyyaml not installed, falling back to JSON")
     return json.loads(text)
+
+
+def _deep_merge(base: dict, override: dict) -> dict:
+    """Recursively merge override into base. Override wins for scalars."""
+    result = base.copy()
+    for k, v in override.items():
+        if k in result and isinstance(result[k], dict) and isinstance(v, dict):
+            result[k] = _deep_merge(result[k], v)
+        else:
+            result[k] = v
+    return result
+
+
+def _load_config(path: str) -> dict:
+    """Load config from YAML/JSON, then deep-merge a .local overlay if present.
+
+    e.g. config/brain.yaml + config/brain.local.yaml
+    The .local file is gitignored and holds secrets like Teams chat IDs.
+    """
+    p = Path(path)
+    config = _load_yaml_or_json(p)
+
+    # Look for .local overlay (same stem + .local + same suffix)
+    local_path = p.parent / f"{p.stem}.local{p.suffix}"
+    if local_path.exists():
+        local_config = _load_yaml_or_json(local_path)
+        config = _deep_merge(config, local_config)
+        logger.info(f"Merged local config from {local_path}")
+
+    return config
 
 
 def main():

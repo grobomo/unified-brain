@@ -20,7 +20,7 @@ _TEAMS_AGENT_DIR = os.path.join(
     os.path.expanduser("~"), "Documents", "ProjectsCL1", "_tmemu", "teams-agent"
 )
 _MSGRAPH_LIB_DIR = os.path.join(
-    os.path.expanduser("~"), "Documents", "ProjectsCL1", "msgraph-lib"
+    os.path.expanduser("~"), "Documents", "ProjectsCL1", "_tmemu", "msgraph-lib"
 )
 
 
@@ -48,7 +48,6 @@ class TeamsAdapter(ChannelAdapter):
     async def start(self):
         _ensure_teams_deps()
         try:
-            from token_manager import get_token
             from lib.msgraph.auth import TokenManager
 
             self._client = TokenManager().get_client()
