@@ -85,6 +85,7 @@ Webhook/API        ──→  Three-tier Memory           ──DISPATCH──�
 ## Phase 8: Bug Fixes & Cleanup
 - [x] T027: Fix brain prompt memory keys — was referencing wrong keys, memory sections never rendered
 - [x] T028: DRY deep_merge — extract to utils.py, used by both runner and registry
+- [x] T029: CI test workflow — GitHub Actions runs pytest on push/PR to main
 
 ## Session Handoff
 All phases complete. PRs #1-12 merged. Service verified working locally.
