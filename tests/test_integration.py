@@ -16,6 +16,7 @@ import unittest
 # Add src to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
+from unified_brain.adapters.base import BoundedSet, parse_timestamp
 from unified_brain.runner import _deep_merge, _load_config
 from unified_brain.store import EventStore
 from unified_brain.brain import BrainAnalyzer, DISPATCH, LOG, RESPOND, ALERT
@@ -580,6 +581,53 @@ class TestOutboxProtocol(unittest.TestCase):
         self.assertTrue(self.dispatcher.teams_outbox.exists())
         self.assertTrue(self.dispatcher.email_outbox.exists())
         self.assertTrue(self.dispatcher.bridge_dir.exists())
+
+
+class TestBoundedSetAndTimestamp(unittest.TestCase):
+    """Tests for BoundedSet and parse_timestamp (T023)."""
+
+    def test_bounded_set_contains(self):
+        bs = BoundedSet(maxsize=5)
+        bs.add("a")
+        self.assertIn("a", bs)
+        self.assertNotIn("b", bs)
+
+    def test_bounded_set_evicts_oldest(self):
+        bs = BoundedSet(maxsize=3)
+        bs.add("a")
+        bs.add("b")
+        bs.add("c")
+        bs.add("d")  # should evict "a"
+        self.assertNotIn("a", bs)
+        self.assertIn("b", bs)
+        self.assertIn("d", bs)
+        self.assertEqual(len(bs), 3)
+
+    def test_bounded_set_readd_refreshes(self):
+        bs = BoundedSet(maxsize=3)
+        bs.add("a")
+        bs.add("b")
+        bs.add("a")  # refresh "a"
+        bs.add("c")
+        bs.add("d")  # should evict "b" (oldest), not "a"
+        self.assertIn("a", bs)
+        self.assertNotIn("b", bs)
+
+    def test_parse_timestamp_iso(self):
+        ts = parse_timestamp("2026-04-06T12:00:00Z")
+        self.assertGreater(ts, 0)
+        self.assertIsInstance(ts, float)
+
+    def test_parse_timestamp_numeric(self):
+        self.assertEqual(parse_timestamp(1700000000.0), 1700000000.0)
+        self.assertEqual(parse_timestamp(1700000000), 1700000000.0)
+
+    def test_parse_timestamp_empty_returns_now(self):
+        before = time.time()
+        ts = parse_timestamp("")
+        after = time.time()
+        self.assertGreaterEqual(ts, before)
+        self.assertLessEqual(ts, after)
 
 
 class TestConfigOverlay(unittest.TestCase):
