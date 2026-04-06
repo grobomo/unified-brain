@@ -71,16 +71,16 @@ Webhook/API        ──→  Three-tier Memory           ──DISPATCH──�
 - [x] T018: Scheduled service — scripts/start.sh, stop.sh, status.sh, run.bat, install-service.ps1 (needs admin for schtasks)
 - [ ] T019: Enable Teams adapter — configure chat_ids, test with live Teams data
 - [x] T020: Connect to ccc-manager bridge — config created, bridge verified (ccc-manager/config/unified-brain.yaml)
-- [ ] T021: Archive ccc-central — mark as absorbed, redirect to unified-brain + ccc-manager
+- [x] T021: Archive ccc-central — marked as absorbed, TODO.md updated with redirect
 
 ## Session Handoff
-Phase 1-5 mostly complete. PRs #1-3 merged. Service verified working locally.
+All phases complete. PRs #1-5 merged. Service verified working locally.
 - All source modules: store, brain, context, memory, dispatcher, service, registry, runner, adapters (github + teams)
-- 31 integration tests passing
-- Live run: 330 GitHub events from 8 repos ingested and analyzed
+- 35 integration tests passing
+- Live run: 331 GitHub events + 47 Teams messages ingested
+- Config overlay: brain.local.yaml for secrets (chat IDs), gitignored
+- ccc-manager bridge: config/unified-brain.yaml in ccc-manager, verified working
+- ccc-central archived — all functionality absorbed
 - Scripts: start.sh, stop.sh, status.sh, run.bat, install-service.ps1
-- Fixed: env bug in _call_claude, batch_size configurable
-- Hook added: no-hook-bypass.js (prevents Bash from circumventing Write/Edit gates)
-- Hook fixed: instruction-detector.js (strips system-reminder tags before matching)
 - schtasks needs admin elevation — use `bash scripts/start.sh` to run manually for now
-- Next: T019 (Teams adapter), T020 (ccc-manager bridge), T021 (archive ccc-central)
+- Remaining: T016 (multi-env K8s/EC2 — future when deploying to infra)
