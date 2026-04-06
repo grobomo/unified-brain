@@ -3,14 +3,20 @@
 Processes events from EventStore, decides actions (RESPOND, DISPATCH, ALERT, LOG),
 and maintains three-tier memory.
 
-Heritage: github-agent/core/brain.py, extended for multi-channel + memory tiers.
+LLM backend is pluggable: subprocess (claude -p) or HTTP API (Anthropic).
 """
 
 import json
+import logging
+import os
 import subprocess
 import time
+from abc import ABC, abstractmethod
 from pathlib import Path
+from urllib.request import urlopen, Request
+from urllib.error import URLError, HTTPError
 
+logger = logging.getLogger(__name__)
 
 # Action types the brain can produce
 RESPOND = "respond"    # Reply in the originating channel (GitHub comment, Teams message)
@@ -19,11 +25,98 @@ ALERT = "alert"        # Send email/notification
 LOG = "log"            # Store in memory only, no action
 
 
+class LLMBackend(ABC):
+    """Abstract LLM backend — pluggable per environment."""
+
+    @abstractmethod
+    def call(self, prompt: str) -> str | None:
+        """Send prompt, return response text or None on failure."""
+        ...
+
+
+class SubprocessBackend(LLMBackend):
+    """Calls `claude -p` as a subprocess. For local development."""
+
+    def __init__(self, claude_path: str = "claude", timeout: int = 60):
+        self.claude_path = claude_path
+        self.timeout = timeout
+
+    def call(self, prompt: str) -> str | None:
+        try:
+            env = {**os.environ, "CLAUDE_CODE_ENTRYPOINT": "unified-brain"}
+            result = subprocess.run(
+                [self.claude_path, "-p", prompt, "--output-format", "text"],
+                capture_output=True, text=True, timeout=self.timeout,
+                env=env,
+            )
+            if result.returncode == 0:
+                return result.stdout.strip()
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            pass
+        return None
+
+
+class APIBackend(LLMBackend):
+    """Calls Anthropic Messages API directly. For containers/EC2/K8s."""
+
+    API_URL = "https://api.anthropic.com/v1/messages"
+
+    def __init__(self, api_key: str, model: str = "claude-sonnet-4-20250514",
+                 max_tokens: int = 1024, timeout: int = 60):
+        self.api_key = api_key
+        self.model = model
+        self.max_tokens = max_tokens
+        self.timeout = timeout
+
+    def call(self, prompt: str) -> str | None:
+        body = json.dumps({
+            "model": self.model,
+            "max_tokens": self.max_tokens,
+            "messages": [{"role": "user", "content": prompt}],
+        }).encode()
+
+        req = Request(self.API_URL, data=body, method="POST")
+        req.add_header("Content-Type", "application/json")
+        req.add_header("x-api-key", self.api_key)
+        req.add_header("anthropic-version", "2023-06-01")
+
+        try:
+            with urlopen(req, timeout=self.timeout) as resp:
+                data = json.loads(resp.read())
+                content = data.get("content", [])
+                if content and content[0].get("type") == "text":
+                    return content[0]["text"].strip()
+        except (URLError, HTTPError, json.JSONDecodeError, KeyError) as e:
+            logger.error(f"Anthropic API error: {e}")
+        return None
+
+
+def _create_backend(config: dict) -> LLMBackend:
+    """Factory: create LLM backend from config."""
+    backend_type = config.get("llm_backend", "subprocess")
+
+    if backend_type == "api":
+        api_key = config.get("api_key", os.environ.get("ANTHROPIC_API_KEY", ""))
+        if not api_key:
+            logger.warning("No API key for Anthropic — falling back to subprocess")
+            return SubprocessBackend(config.get("claude_path", "claude"), config.get("timeout", 60))
+        return APIBackend(
+            api_key=api_key,
+            model=config.get("model", "claude-sonnet-4-20250514"),
+            max_tokens=config.get("max_tokens", 1024),
+            timeout=config.get("timeout", 60),
+        )
+
+    return SubprocessBackend(config.get("claude_path", "claude"), config.get("timeout", 60))
+
+
 class BrainAnalyzer:
     """Analyzes events and produces actions."""
 
     def __init__(self, config: dict = None):
         self.config = config or {}
+        self.backend = _create_backend(self.config)
+        # Keep for backwards compat in tests
         self.claude_path = self.config.get("claude_path", "claude")
         self.timeout = self.config.get("timeout", 60)
 
@@ -42,12 +135,12 @@ class BrainAnalyzer:
                 metadata: dict — action-specific data
         """
         prompt = self._build_prompt(event, context)
-        result = self._call_claude(prompt)
+        result = self.backend.call(prompt)
 
         if result:
             return self._parse_action(result, event)
 
-        # Rule-based fallback when claude is unavailable
+        # Rule-based fallback when LLM is unavailable
         return self._fallback_analyze(event)
 
     def _build_prompt(self, event: dict, context: dict = None) -> str:
@@ -130,21 +223,6 @@ class BrainAnalyzer:
         ])
 
         return "\n".join(parts)
-
-    def _call_claude(self, prompt: str) -> str | None:
-        try:
-            import os
-            env = {**os.environ, "CLAUDE_CODE_ENTRYPOINT": "unified-brain"}
-            result = subprocess.run(
-                [self.claude_path, "-p", prompt, "--output-format", "text"],
-                capture_output=True, text=True, timeout=self.timeout,
-                env=env,
-            )
-            if result.returncode == 0:
-                return result.stdout.strip()
-        except (subprocess.TimeoutExpired, FileNotFoundError):
-            pass
-        return None
 
     def _parse_action(self, raw: str, event: dict) -> dict:
         # Try to extract JSON from response
