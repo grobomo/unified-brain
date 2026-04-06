@@ -28,6 +28,7 @@ from unified_brain.memory import MemoryManager
 from unified_brain.registry import ProjectRegistry
 from unified_brain.service import BrainService
 from unified_brain.adapters.base import ChannelAdapter
+from unified_brain.adapters.webhook import WebhookAdapter
 
 
 class MockAdapter(ChannelAdapter):
@@ -1143,6 +1144,159 @@ class TestFeedback(unittest.TestCase):
         self.assertIn("Recent Outcomes", prompt)
         self.assertIn("DISPATCH: 8/10", prompt)
         self.assertIn("timeout", prompt)
+
+
+class TestWebhookAdapter(unittest.TestCase):
+    """Tests for webhook adapter (T040)."""
+
+    def setUp(self):
+        import socket
+        # Find a free port
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.bind(("", 0))
+            self.port = s.getsockname()[1]
+        self.adapter = WebhookAdapter({"webhook_port": self.port, "webhook_bind": "127.0.0.1"})
+
+    def tearDown(self):
+        asyncio.run(self.adapter.stop())
+
+    def _post(self, path, data, headers=None):
+        from urllib.request import urlopen, Request
+        body = json.dumps(data).encode()
+        req = Request(f"http://127.0.0.1:{self.port}{path}", data=body, method="POST")
+        req.add_header("Content-Type", "application/json")
+        if headers:
+            for k, v in headers.items():
+                req.add_header(k, v)
+        return urlopen(req, timeout=5)
+
+    def _get(self, path):
+        from urllib.request import urlopen
+        return urlopen(f"http://127.0.0.1:{self.port}{path}", timeout=5)
+
+    def test_post_single_event(self):
+        """POST /events with a single event dict."""
+        asyncio.run(self.adapter.start())
+        event = {
+            "id": "test-1", "source": "jira", "channel": "PROJ-123",
+            "event_type": "issue_created", "author": "alice",
+            "title": "New bug", "body": "Something is broken",
+        }
+        resp = self._post("/events", event)
+        self.assertEqual(resp.status, 202)
+        result = json.loads(resp.read())
+        self.assertEqual(result["accepted"], 1)
+
+        # Poll should return the event
+        events = asyncio.run(self.adapter.poll())
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["id"], "test-1")
+        self.assertEqual(events[0]["source"], "jira")
+
+    def test_post_batch_events(self):
+        """POST /events with a list of events."""
+        asyncio.run(self.adapter.start())
+        events = [
+            {"id": "batch-1", "source": "slack", "title": "msg 1"},
+            {"id": "batch-2", "source": "slack", "title": "msg 2"},
+        ]
+        resp = self._post("/events", events)
+        self.assertEqual(resp.status, 202)
+        result = json.loads(resp.read())
+        self.assertEqual(result["accepted"], 2)
+
+        polled = asyncio.run(self.adapter.poll())
+        self.assertEqual(len(polled), 2)
+
+    def test_post_raw_github_webhook(self):
+        """POST /events/raw with a GitHub-style webhook payload."""
+        asyncio.run(self.adapter.start())
+        payload = {
+            "action": "opened",
+            "issue": {"title": "Bug report", "number": 42},
+            "repository": {"full_name": "grobomo/test-repo"},
+            "sender": {"login": "octocat"},
+        }
+        resp = self._post("/events/raw", payload,
+                          headers={"X-GitHub-Event": "issues"})
+        self.assertEqual(resp.status, 202)
+
+        events = asyncio.run(self.adapter.poll())
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["channel"], "grobomo/test-repo")
+        self.assertEqual(events[0]["event_type"], "issues")
+        self.assertIn("Bug report", events[0]["title"])
+
+    def test_get_stats(self):
+        """GET /events/stats returns queue depth and accepted count."""
+        asyncio.run(self.adapter.start())
+        self._post("/events", {"id": "s1", "title": "test"})
+        resp = self._get("/events/stats")
+        stats = json.loads(resp.read())
+        self.assertEqual(stats["accepted_total"], 1)
+        self.assertEqual(stats["queue_depth"], 1)
+
+    def test_invalid_json(self):
+        """POST with invalid JSON returns 400."""
+        asyncio.run(self.adapter.start())
+        from urllib.request import urlopen, Request
+        from urllib.error import HTTPError
+        req = Request(f"http://127.0.0.1:{self.port}/events",
+                      data=b"not json", method="POST")
+        req.add_header("Content-Type", "application/json")
+        with self.assertRaises(HTTPError) as cm:
+            urlopen(req, timeout=5)
+        self.assertEqual(cm.exception.code, 400)
+
+    def test_hmac_verification(self):
+        """HMAC signature is verified when secret is configured."""
+        import hashlib as hl
+        import hmac as hm
+        secret = "test-secret-123"
+        self.adapter = WebhookAdapter({
+            "webhook_port": self.port, "webhook_bind": "127.0.0.1",
+            "webhook_secret": secret,
+        })
+        asyncio.run(self.adapter.start())
+
+        payload = json.dumps({"id": "hmac-1", "title": "signed"}).encode()
+        sig = "sha256=" + hm.new(secret.encode(), payload, hl.sha256).hexdigest()
+
+        from urllib.request import urlopen, Request
+        req = Request(f"http://127.0.0.1:{self.port}/events",
+                      data=payload, method="POST")
+        req.add_header("Content-Type", "application/json")
+        req.add_header("X-Hub-Signature-256", sig)
+        resp = urlopen(req, timeout=5)
+        self.assertEqual(resp.status, 202)
+
+        # Bad signature should fail
+        from urllib.error import HTTPError
+        req2 = Request(f"http://127.0.0.1:{self.port}/events",
+                       data=payload, method="POST")
+        req2.add_header("Content-Type", "application/json")
+        req2.add_header("X-Hub-Signature-256", "sha256=bad")
+        with self.assertRaises(HTTPError) as cm:
+            urlopen(req2, timeout=5)
+        self.assertEqual(cm.exception.code, 401)
+
+    def test_poll_drains_queue(self):
+        """Poll returns all queued events and leaves queue empty."""
+        asyncio.run(self.adapter.start())
+        self._post("/events", [{"id": f"d-{i}"} for i in range(5)])
+        events = asyncio.run(self.adapter.poll())
+        self.assertEqual(len(events), 5)
+        # Second poll should be empty
+        events2 = asyncio.run(self.adapter.poll())
+        self.assertEqual(len(events2), 0)
+
+    def test_auto_generated_id(self):
+        """Events without an ID get a deterministic hash-based ID."""
+        asyncio.run(self.adapter.start())
+        self._post("/events", {"title": "no id event", "body": "test"})
+        events = asyncio.run(self.adapter.poll())
+        self.assertEqual(len(events), 1)
+        self.assertTrue(events[0]["id"].startswith("wh:"))
 
 
 class TestMetrics(unittest.TestCase):

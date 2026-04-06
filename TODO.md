@@ -98,14 +98,14 @@ Brain is the constant. Adapters, LLM backend, dispatchers are pluggable per envi
 - [x] T037: Active RESPOND — ActionExecutor posts GitHub comments via `gh api`, Teams messages via Graph API, fallback to outbox
 - [x] T038: Prometheus metrics — lightweight stdlib module, counters+gauges with labels, /metrics endpoint, 10 metric series, 74 tests
 - [x] T039: Feedback loop — FeedbackStore (SQLite), records dispatch/respond outcomes, summary stats in brain prompt, 80 tests
-- [ ] T040: Webhook adapter — HTTP endpoint that accepts events (for integrations beyond polling)
+- [x] T040: Webhook adapter — HTTP server, POST /events + /events/raw + GET /events/stats, HMAC verification, 88 tests
 
 ## Session Handoff
-PRs #1-22 merged. CI green. 38 tasks done (T001-T038), Phase 10 in progress.
-- SERVICE IS LIVE locally: interval=3s, health on :8790, both adapters connected
-- Architecture: pluggable adapters, LLM backend (subprocess/api), dispatcher transport (file/SQS), active respond (executor)
-- 601+ events in store, 74 tests passing, zero external deps for core
-- Prometheus metrics: /metrics endpoint, 10 metric series (ingestion, decisions, dispatch, respond, cycles, errors)
+PRs #1-24 merged. CI green. 40 tasks done (T001-T040), Phase 10 complete.
+- SERVICE IS LIVE locally: interval=3s, health on :8790, all adapters connected
+- Architecture: pluggable adapters (GitHub, Teams, Webhook), LLM backend (subprocess/api), dispatcher transport (file/SQS), active respond
+- 601+ events in store, 88 tests passing, zero external deps for core
+- Prometheus metrics: /metrics endpoint, 10 metric series
+- Feedback loop: tracks dispatch/respond outcomes, feeds success/failure patterns to brain
+- Webhook adapter: HTTP POST /events, /events/raw (GitHub webhooks), HMAC verification
 - Deployment artifacts: Dockerfile, K8s manifests (kustomize), CloudFormation (EC2 spot + SQS)
-- Feedback loop: FeedbackStore tracks outcomes, brain prompt shows success/failure patterns
-- Next: T040 (webhook adapter)

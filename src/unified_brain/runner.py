@@ -22,6 +22,7 @@ from pathlib import Path
 from .service import BrainService
 from .adapters.github import GitHubAdapter
 from .adapters.teams import TeamsAdapter
+from .adapters.webhook import WebhookAdapter
 from .utils import deep_merge
 
 logger = logging.getLogger("unified-brain")
@@ -148,6 +149,9 @@ async def run_service(config: dict, once: bool = False,
     if adapters_config.get("teams", {}).get("enabled", False):
         teams_config = adapters_config["teams"]
         service.add_adapter(TeamsAdapter(teams_config))
+    if adapters_config.get("webhook", {}).get("enabled", False):
+        wh_config = adapters_config["webhook"]
+        service.add_adapter(WebhookAdapter(wh_config))
 
     stats["adapters"] = len(service.adapters)
     logger.info(f"Starting with {len(service.adapters)} adapters, interval={service.interval}s")
