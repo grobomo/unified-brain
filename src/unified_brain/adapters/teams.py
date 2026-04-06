@@ -6,6 +6,7 @@ Authenticates via client_credentials OAuth2 flow with tenant_id/client_id/client
 
 import json
 import logging
+import re
 import time
 from urllib.request import urlopen, Request
 from urllib.error import URLError, HTTPError
@@ -167,7 +168,6 @@ class TeamsAdapter(ChannelAdapter):
                     # Extract text from message body
                     body_content = (msg.get("body") or {}).get("content", "")
                     # Strip HTML tags (simple approach)
-                    import re
                     text = re.sub(r'<[^>]+>', '', body_content).strip()
                     if not text:
                         continue
