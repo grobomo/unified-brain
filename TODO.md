@@ -75,6 +75,7 @@ Webhook/API        ──→  Three-tier Memory           ──DISPATCH──�
 
 ## Phase 6: Hardening
 - [x] T022: Optimize store queries — add author filter to recent(), add author index, avoid full scans in context builder
+- [ ] T023: Fix memory leak in adapters — bounded _seen_ids, DRY timestamp parsing into base adapter
 
 ## Session Handoff
 All phases complete. PRs #1-6 merged. Service verified working locally.
