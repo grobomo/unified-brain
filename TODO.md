@@ -83,9 +83,9 @@ Webhook/API        ──→  Three-tier Memory           ──DISPATCH──�
 - [x] T026: Add README for public repo
 
 ## Session Handoff
-All phases complete. PRs #1-10 merged. Service verified working locally.
+All phases complete. PRs #1-12 merged. Service verified working locally.
 - All source modules: store, brain, context, memory, dispatcher, service, registry, runner, adapters (github + teams)
-- 47 integration tests passing
+- 48 integration tests passing
 - Live run: 331 GitHub events + 47 Teams messages ingested
 - Config overlay: brain.local.yaml + projects.local.json for secrets, gitignored
 - Registry overlay: Teams chat IDs merged from local file, cross-channel context works
@@ -95,5 +95,7 @@ All phases complete. PRs #1-10 merged. Service verified working locally.
 - Store: author index + filtered queries, no full table scans
 - Scripts: start.sh, stop.sh, status.sh, run.bat, install-service.ps1
 - Multi-env: Dockerfile, K8s manifests (deployment/service/configmap/pvc/kustomization), ${VAR} interpolation in config
+- Brain prompt: structured sections for project info, memory, channel activity, action guidelines
+- README: architecture, quickstart, config docs, testing
 - schtasks needs admin elevation — use `bash scripts/start.sh` to run manually for now
-- All tasks complete. Next opportunities: improve brain LLM prompt with memory context, add README for public repo
+- All tasks complete. Project is feature-complete for local use. Future: deploy to K8s/EC2, add more channel adapters (Slack, email), improve LLM prompts based on real usage patterns.
