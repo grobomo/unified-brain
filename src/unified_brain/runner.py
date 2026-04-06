@@ -22,6 +22,7 @@ from pathlib import Path
 from .service import BrainService
 from .adapters.github import GitHubAdapter
 from .adapters.teams import TeamsAdapter
+from .utils import deep_merge
 
 logger = logging.getLogger("unified-brain")
 
@@ -216,14 +217,8 @@ def _load_yaml_or_json(path: Path) -> dict:
 
 
 def _deep_merge(base: dict, override: dict) -> dict:
-    """Recursively merge override into base. Override wins for scalars."""
-    result = base.copy()
-    for k, v in override.items():
-        if k in result and isinstance(result[k], dict) and isinstance(v, dict):
-            result[k] = _deep_merge(result[k], v)
-        else:
-            result[k] = v
-    return result
+    """Backwards-compatible alias for deep_merge."""
+    return deep_merge(base, override)
 
 
 _ENV_RE = re.compile(r'\$\{([A-Za-z_][A-Za-z0-9_]*)\}')

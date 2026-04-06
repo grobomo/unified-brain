@@ -24,6 +24,8 @@ import logging
 from pathlib import Path
 from typing import Optional
 
+from .utils import deep_merge
+
 logger = logging.getLogger(__name__)
 
 # YAML is optional — fall back to JSON if pyyaml not installed
@@ -76,14 +78,8 @@ class ProjectRegistry:
 
     @staticmethod
     def _deep_merge(base: dict, override: dict) -> dict:
-        """Recursively merge override into base."""
-        result = base.copy()
-        for k, v in override.items():
-            if k in result and isinstance(result[k], dict) and isinstance(v, dict):
-                result[k] = ProjectRegistry._deep_merge(result[k], v)
-            else:
-                result[k] = v
-        return result
+        """Backwards-compatible alias for deep_merge."""
+        return deep_merge(base, override)
 
     def _build_indices(self):
         """Build reverse-lookup indices."""

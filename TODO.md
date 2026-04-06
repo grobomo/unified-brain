@@ -82,8 +82,9 @@ Webhook/API        ──→  Three-tier Memory           ──DISPATCH──�
 - [x] T025: Improve brain LLM prompt — structured memory context, action guidelines, cross-channel awareness
 - [x] T026: Add README for public repo
 
-## Phase 8: Bug Fixes
+## Phase 8: Bug Fixes & Cleanup
 - [x] T027: Fix brain prompt memory keys — was referencing wrong keys, memory sections never rendered
+- [x] T028: DRY deep_merge — extract to utils.py, used by both runner and registry
 
 ## Session Handoff
 All phases complete. PRs #1-12 merged. Service verified working locally.
