@@ -46,19 +46,44 @@ class ProjectRegistry:
         self.load()
 
     def load(self):
-        """Load registry from YAML or JSON file."""
+        """Load registry from YAML or JSON file, with .local overlay.
+
+        e.g. config/projects.json + config/projects.local.json
+        The .local file is gitignored and holds secrets like Teams chat IDs.
+        """
         if not self.config_path.exists():
             logger.warning(f"Registry not found: {self.config_path}")
             return
 
-        text = self.config_path.read_text()
-        if self.config_path.suffix in (".yaml", ".yml") and _HAS_YAML:
-            data = yaml.safe_load(text) or {}
-        else:
-            data = json.loads(text)
+        data = self._load_file(self.config_path)
+
+        # Merge .local overlay if present
+        local_path = self.config_path.parent / f"{self.config_path.stem}.local{self.config_path.suffix}"
+        if local_path.exists():
+            local_data = self._load_file(local_path)
+            data = self._deep_merge(data, local_data)
+            logger.info(f"Merged local registry from {local_path}")
 
         self.projects = data.get("projects", {})
         self._build_indices()
+
+    @staticmethod
+    def _load_file(path: Path) -> dict:
+        text = path.read_text()
+        if path.suffix in (".yaml", ".yml") and _HAS_YAML:
+            return yaml.safe_load(text) or {}
+        return json.loads(text)
+
+    @staticmethod
+    def _deep_merge(base: dict, override: dict) -> dict:
+        """Recursively merge override into base."""
+        result = base.copy()
+        for k, v in override.items():
+            if k in result and isinstance(result[k], dict) and isinstance(v, dict):
+                result[k] = ProjectRegistry._deep_merge(result[k], v)
+            else:
+                result[k] = v
+        return result
 
     def _build_indices(self):
         """Build reverse-lookup indices."""
