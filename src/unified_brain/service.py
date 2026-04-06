@@ -9,8 +9,9 @@ import logging
 import time
 
 from .store import EventStore
-from .brain import BrainAnalyzer
+from .brain import BrainAnalyzer, RESPOND
 from .dispatcher import ActionDispatcher
+from .registry import ProjectRegistry
 
 log = logging.getLogger("unified-brain")
 
@@ -23,6 +24,7 @@ class BrainService:
         self.store = EventStore(self.config.get("db_path", "data/brain.db"))
         self.brain = BrainAnalyzer(self.config.get("brain", {}))
         self.dispatcher = ActionDispatcher(self.config.get("dispatcher", {}))
+        self.registry = ProjectRegistry(self.config.get("registry_path", "config/projects.yaml"))
         self.adapters = []
         self.interval = self.config.get("interval", 60)
         self.running = False
@@ -59,11 +61,13 @@ class BrainService:
             except Exception as e:
                 log.error(f"[brain] Error processing {event.get('id')}: {e}")
 
-        # 3. Check for results from ccc-manager
+        # 3. Check for results from ccc-manager and relay to originating channels
         results = self.dispatcher.poll_results()
         for result in results:
-            log.info(f"[result] Task {result.get('id')}: {'success' if result.get('success') else 'failed'}")
-            # TODO: relay result to originating channel via channel_context
+            success = result.get("success", False)
+            task_id = result.get("id", "?")
+            log.info(f"[result] Task {task_id}: {'success' if success else 'failed'}")
+            self._relay_result(result)
 
     async def start(self):
         """Start the service loop."""
@@ -76,6 +80,44 @@ class BrainService:
         while self.running:
             await self.run_cycle()
             await asyncio.sleep(self.interval)
+
+    def _relay_result(self, result: dict):
+        """Relay a ccc-manager result back to the originating channel."""
+        ctx = result.get("channel_context", {})
+        source = ctx.get("source")
+        channel = ctx.get("channel")
+
+        if not source or not channel:
+            log.debug(f"[relay] No channel_context in result {result.get('id')}, skipping relay")
+            return
+
+        success = result.get("success", False)
+        output = result.get("output", "")
+        pr_url = result.get("pr_url", "")
+
+        if success:
+            summary = f"Task completed: {output[:200]}"
+            if pr_url:
+                summary += f"\nPR: {pr_url}"
+        else:
+            error = result.get("error", "unknown error")
+            summary = f"Task failed: {error[:200]}"
+
+        # Create a RESPOND action to post the summary
+        relay_action = {
+            "action": RESPOND,
+            "source": source,
+            "channel": channel,
+            "event_id": ctx.get("event_id"),
+            "content": summary,
+            "metadata": {"result_id": result.get("id")},
+        }
+
+        try:
+            self.dispatcher.dispatch(relay_action)
+            log.info(f"[relay] Result {result.get('id')} relayed to {source}:{channel}")
+        except Exception as e:
+            log.error(f"[relay] Failed to relay result {result.get('id')}: {e}")
 
     async def stop(self):
         """Stop the service loop."""

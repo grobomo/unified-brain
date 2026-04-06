@@ -45,10 +45,10 @@ Webhook/API        ──→  Three-tier Memory           ──DISPATCH──�
 - [x] T006: Brain service — service loop with adapters, brain analyzer, action dispatcher, result polling
 
 ## Phase 2: ccc-manager Integration
-- [ ] T007: Task dispatch adapter — brain writes task JSON to ccc-manager bridge directory (local) or SQS queue (AWS). Format matches ccc-manager's BridgeInput expectations.
-- [ ] T008: Result poller — brain polls ccc-manager's completedDir for result JSON. Updates memory with outcomes. Posts summaries to originating channel.
-- [ ] T009: Project registry — shared YAML catalog mapping repos, Teams chats, people, and ccc-manager configs to projects. Both brain and manager reference this.
-- [ ] T010: End-to-end test — Teams message → brain analysis → ccc-manager dispatch → worker execution → result → Teams reply
+- [x] T007: Task dispatch adapter — bridge JSON with BridgeInput-compatible fields (text, classification, request_id)
+- [x] T008: Result poller + relay — polls completedDir, relays results to originating channel via RESPOND action
+- [x] T009: Project registry — YAML/JSON catalog with reverse-lookup indices (repo→project, chat→project, person→project)
+- [x] T010: Integration test — 15 tests covering store, brain, dispatcher, registry, and full E2E pipeline
 
 ## Phase 3: Cross-Channel Intelligence
 - [ ] T011: Cross-channel context — when analyzing a GitHub event, include relevant Teams context (same person, same project) and vice versa

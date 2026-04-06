@@ -64,20 +64,30 @@ class ActionDispatcher:
     def _dispatch_to_manager(self, action: dict) -> dict:
         """Write task JSON to ccc-manager bridge directory.
 
-        Format matches ccc-manager's BridgeInput expectations.
+        Format matches ccc-manager's BridgeInput expectations:
+        - BridgeInput reads: text (-> summary), classification (-> type), request_id (-> id)
+        - We include both canonical and BridgeInput-compatible field names
         """
         task_id = f"brain-{int(time.time() * 1000)}"
+        content = action.get("content", "")
         task = {
+            # Canonical fields (ccc-manager base)
             "id": task_id,
             "source": f"{action.get('source')}:{action.get('channel')}",
             "type": "fix",
-            "summary": action.get("content", ""),
+            "summary": content,
             "priority": action.get("metadata", {}).get("priority", "normal"),
+            # BridgeInput compatibility fields
+            "request_id": task_id,
+            "text": content,
+            "classification": "fix",
+            # Context for result relay
             "details": action.get("metadata", {}),
             "channel_context": {
                 "reply_to": f"{action.get('source')}:{action.get('channel')}:{action.get('event_id')}",
                 "source": action.get("source"),
                 "channel": action.get("channel"),
+                "event_id": action.get("event_id"),
             },
         }
 
