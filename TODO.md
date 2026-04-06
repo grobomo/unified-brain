@@ -68,9 +68,10 @@ Webhook/API        ──→  Three-tier Memory           ──DISPATCH──�
 - msgraph-lib at `~/Documents/ProjectsCL1/msgraph-lib/` — shared MS Graph token management
 
 ## Session Handoff
-Phase 1 (foundation) and Phase 2 (ccc-manager integration) complete.
+Phase 1+2 complete. PR #1 open. Branch: 001-T001-project-foundation.
 - All source modules built: store, brain, dispatcher, service, registry, adapters (github + teams)
 - 15 integration tests passing
-- Branch: 001-T001-project-foundation with 3 commits (initial TODO, Phase 1, Phase 2)
-- Next: Push branch, create PR, then Phase 3 (cross-channel intelligence) and write ccc-manager integration TODOs
-- ccc-central should be archived (TODO only, no code, fully absorbed)
+- PR: https://github.com/grobomo/unified-brain/pull/1
+- ccc-manager TODO.md updated with Phase 50 integration tasks (T181-T184)
+- ccc-central should be archived (absorbed into this project + ccc-manager)
+- Next: Phase 3 (cross-channel intelligence T011-T013), then implement RESPOND actions (gh CLI, teams_chat.py)
