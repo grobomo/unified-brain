@@ -68,19 +68,19 @@ Webhook/API        ──→  Three-tier Memory           ──DISPATCH──�
 - msgraph-lib at `~/Documents/ProjectsCL1/msgraph-lib/` — shared MS Graph token management
 
 ## Phase 5: Operational Polish
-- [ ] T018: Scheduled service — use claude-scheduler or schtasks to run brain as persistent background service
+- [x] T018: Scheduled service — scripts/start.sh, stop.sh, status.sh, run.bat, install-service.ps1 (needs admin for schtasks)
 - [ ] T019: Enable Teams adapter — configure chat_ids, test with live Teams data
 - [ ] T020: Connect to ccc-manager bridge — point dispatcher outbox at ccc-manager's bridge input dir
 - [ ] T021: Archive ccc-central — mark as absorbed, redirect to unified-brain + ccc-manager
 
 ## Session Handoff
-Phase 1-4 complete. PRs #1 and #2 merged. Service verified working locally.
+Phase 1-5 mostly complete. PRs #1-3 merged. Service verified working locally.
 - All source modules: store, brain, context, memory, dispatcher, service, registry, runner, adapters (github + teams)
 - 31 integration tests passing
-- First live run: 330 GitHub events ingested from 8 repos, 50 analyzed (fallback mode), 280 remaining
-- Fixed: env bug in _call_claude (was wiping PATH), batch_size now configurable (100)
+- Live run: 330 GitHub events from 8 repos ingested and analyzed
+- Scripts: start.sh, stop.sh, status.sh, run.bat, install-service.ps1
+- Fixed: env bug in _call_claude, batch_size configurable
 - Hook added: no-hook-bypass.js (prevents Bash from circumventing Write/Edit gates)
-- Hook fixed: instruction-detector.js (strips system-reminder tags before pattern matching)
-- Database: data/brain.db, health on :8790
-- Background process was running (b5rly4aso) but may have been killed by context reset
-- Next: T018 (scheduled service), T019 (Teams), T020 (ccc-manager bridge)
+- Hook fixed: instruction-detector.js (strips system-reminder tags before matching)
+- schtasks needs admin elevation — use `bash scripts/start.sh` to run manually for now
+- Next: T019 (Teams adapter), T020 (ccc-manager bridge), T021 (archive ccc-central)
