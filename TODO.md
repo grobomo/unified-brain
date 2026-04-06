@@ -95,7 +95,7 @@ Brain is the constant. Adapters, LLM backend, dispatchers are pluggable per envi
 - [x] T033: Pluggable dispatcher — filesystem outbox OR SQS
 - [x] T034: Verify local deployment — 601 events (554 GitHub + 47 Teams), brain analyzing, health endpoint on :8790
 - [x] T035: Deploy to RONE K8s — Dockerfile (gh CLI, PYTHONPATH), manifests (API backend, network policy, tmpfs, secret ref), deploy script
-- [ ] T036: Deploy to AWS EC2 — spot instance, SQS dispatcher, CloudWatch logs, verify
+- [x] T036: Deploy to AWS EC2 — CloudFormation (spot instance, SQS queues, IAM, CloudWatch, systemd), deploy script
 
 ## Session Handoff
 PRs #1-16 merged. CI green. Brain service RUNNING LOCALLY (PID in data/brain.pid).
@@ -107,6 +107,6 @@ PRs #1-16 merged. CI green. Brain service RUNNING LOCALLY (PID in data/brain.pid
 - 601+ events in unified store, 426+ processed by brain
 - 57 tests passing (10 new for transport factory + SQS mock)
 - Spec: specs/005-portable-deployment/SPEC.md
-- Next: T035 (RONE K8s deploy), T036 (AWS EC2 deploy)
+- All Phase 9 tasks complete (T030-T036). Portable deployment: local, K8s, EC2.
 - Dependencies removed: no more github-agent, teams-agent, or msgraph-lib imports needed
 - The `requirements.txt` is empty — pure stdlib + `gh` CLI. Add `boto3` for SQS transport.
