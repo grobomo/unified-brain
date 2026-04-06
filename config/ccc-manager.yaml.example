@@ -1,0 +1,38 @@
+# ccc-manager config for unified-brain integration
+# Copy to ccc-manager/config/unified-brain.yaml and adjust paths.
+#
+# Bridge input: reads task JSON from unified-brain's dispatch outbox
+# File notifier: writes results back for unified-brain to poll
+#
+# Both projects run locally — paths point at unified-brain's data directory.
+
+name: unified-brain
+interval: 30000
+healthPort: 8082
+
+inputs:
+  brain-dispatch:
+    type: bridge
+    # Absolute path to unified-brain's dispatch outbox
+    # ccc-manager expands ${VAR} from process.env
+    path: ${USERPROFILE}/Documents/ProjectsCL1/_grobomo/unified-brain/data/outbox/dispatch
+    completedDir: ${USERPROFILE}/Documents/ProjectsCL1/_grobomo/unified-brain/data/outbox/dispatch/done
+
+dispatcher:
+  type: claude
+  timeout: 60000
+
+workers:
+  default:
+    type: local
+    timeout: 120000
+    shell: true
+
+notifiers:
+  brain-results:
+    type: file
+    # Write results to unified-brain's inbox for result polling
+    dir: ${USERPROFILE}/Documents/ProjectsCL1/_grobomo/unified-brain/data/inbox
+    prefix: brain
+
+maxRetries: 1

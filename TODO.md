@@ -70,7 +70,7 @@ Webhook/API        ──→  Three-tier Memory           ──DISPATCH──�
 ## Phase 5: Operational Polish
 - [x] T018: Scheduled service — scripts/start.sh, stop.sh, status.sh, run.bat, install-service.ps1 (needs admin for schtasks)
 - [ ] T019: Enable Teams adapter — configure chat_ids, test with live Teams data
-- [ ] T020: Connect to ccc-manager bridge — point dispatcher outbox at ccc-manager's bridge input dir
+- [x] T020: Connect to ccc-manager bridge — config created, bridge verified (ccc-manager/config/unified-brain.yaml)
 - [ ] T021: Archive ccc-central — mark as absorbed, redirect to unified-brain + ccc-manager
 
 ## Session Handoff
