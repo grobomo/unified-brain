@@ -5,6 +5,7 @@ If execution fails, the action is still written to the outbox as a fallback.
 
 GitHub: posts comments via `gh api`
 Teams: sends messages via MS Graph API
+Slack: sends messages via chat.postMessage API
 """
 
 import json
@@ -144,6 +145,46 @@ class ActionExecutor:
         except (URLError, HTTPError, KeyError) as e:
             logger.error(f"Teams token acquisition failed: {e}")
             return ""
+
+    def respond_slack(self, channel_id: str, body: str, thread_ts: str = "") -> dict:
+        """Send a message to a Slack channel via chat.postMessage API.
+
+        Args:
+            channel_id: Slack channel ID (e.g. C0123456789)
+            body: message text
+            thread_ts: optional thread timestamp to reply in a thread
+        """
+        bot_token = self.config.get("slack_bot_token", "")
+        if not bot_token:
+            return {"status": "error", "error": "No Slack bot_token configured"}
+
+        url = "https://slack.com/api/chat.postMessage"
+        payload = {
+            "channel": channel_id,
+            "text": body,
+        }
+        if thread_ts:
+            payload["thread_ts"] = thread_ts
+
+        data = json.dumps(payload).encode()
+        req = Request(url, data=data, method="POST")
+        req.add_header("Authorization", f"Bearer {bot_token}")
+        req.add_header("Content-Type", "application/json; charset=utf-8")
+
+        try:
+            with urlopen(req, timeout=30) as resp:
+                result = json.loads(resp.read())
+                if result.get("ok"):
+                    ts = result.get("ts", "")
+                    logger.info(f"Slack message sent to {channel_id}: {ts}")
+                    return {"status": "executed", "ts": ts}
+                else:
+                    error = result.get("error", "unknown")
+                    logger.error(f"Slack message failed: {error}")
+                    return {"status": "error", "error": error}
+        except (HTTPError, URLError) as e:
+            logger.error(f"Slack message failed: {e}")
+            return {"status": "error", "error": str(e)}
 
     @staticmethod
     def _extract_number(event_id: str) -> str:

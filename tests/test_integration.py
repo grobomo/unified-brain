@@ -1424,5 +1424,308 @@ class TestMetrics(unittest.TestCase):
             shutil.rmtree(tmpdir)
 
 
+class TestSlackAdapter(unittest.TestCase):
+    """Tests for the Slack channel adapter."""
+
+    def test_source_is_slack(self):
+        from unified_brain.adapters.slack import SlackAdapter
+        adapter = SlackAdapter({"bot_token": "xoxb-test", "channel_ids": ["C123"]})
+        self.assertEqual(adapter.source, "slack")
+        self.assertEqual(adapter.name, "slack")
+
+    def test_poll_without_start_returns_empty(self):
+        from unified_brain.adapters.slack import SlackAdapter
+        adapter = SlackAdapter({"bot_token": "xoxb-test", "channel_ids": ["C123"]})
+        events = asyncio.run(adapter.poll())
+        self.assertEqual(events, [])
+
+    def test_start_without_token_logs_error(self):
+        from unified_brain.adapters.slack import SlackAdapter
+        adapter = SlackAdapter({})
+        asyncio.run(adapter.start())
+        self.assertIsNone(adapter._client)
+
+    def test_normalize_messages(self):
+        """Test message normalization logic directly."""
+        from unified_brain.adapters.slack import SlackAdapter, _SlackClient
+        adapter = SlackAdapter({
+            "bot_token": "xoxb-test",
+            "channel_ids": ["C123"],
+        })
+
+        # Mock the client to return canned messages
+        class MockSlackClient:
+            def get(self, method, params=None):
+                if method == "conversations.history":
+                    return {
+                        "ok": True,
+                        "messages": [
+                            {
+                                "ts": "1700000001.000001",
+                                "user": "U123",
+                                "text": "Hello from Slack!",
+                            },
+                            {
+                                "ts": "1700000002.000002",
+                                "user": "U456",
+                                "text": "Second message",
+                            },
+                            {
+                                "ts": "1700000003.000003",
+                                "subtype": "channel_join",
+                                "text": "joined the channel",
+                            },
+                            {
+                                "ts": "1700000004.000004",
+                                "user": "U789",
+                                "text": "",  # empty — should be skipped
+                            },
+                        ],
+                    }
+                return {"ok": True}
+
+        adapter._client = MockSlackClient()
+        events = asyncio.run(adapter.poll())
+
+        self.assertEqual(len(events), 2)
+        self.assertEqual(events[0]["id"], "slack:C123:1700000001.000001")
+        self.assertEqual(events[0]["source"], "slack")
+        self.assertEqual(events[0]["channel"], "C123")
+        self.assertEqual(events[0]["author"], "U123")
+        self.assertEqual(events[0]["body"], "Hello from Slack!")
+        self.assertEqual(events[0]["event_type"], "message")
+        self.assertIn("ts", events[0]["metadata"])
+
+        self.assertEqual(events[1]["author"], "U456")
+
+    def test_dedup_on_second_poll(self):
+        """Already-seen messages are not returned again."""
+        from unified_brain.adapters.slack import SlackAdapter
+
+        class MockSlackClient:
+            def get(self, method, params=None):
+                return {
+                    "ok": True,
+                    "messages": [
+                        {"ts": "1700000001.000001", "user": "U1", "text": "msg"},
+                    ],
+                }
+
+        adapter = SlackAdapter({"bot_token": "xoxb-test", "channel_ids": ["C1"]})
+        adapter._client = MockSlackClient()
+
+        events1 = asyncio.run(adapter.poll())
+        self.assertEqual(len(events1), 1)
+
+        events2 = asyncio.run(adapter.poll())
+        self.assertEqual(len(events2), 0)
+
+    def test_cursor_updates_for_incremental_polling(self):
+        """After polling, cursor should be set to newest ts."""
+        from unified_brain.adapters.slack import SlackAdapter
+
+        class MockSlackClient:
+            def get(self, method, params=None):
+                return {
+                    "ok": True,
+                    "messages": [
+                        {"ts": "1700000010.000000", "user": "U1", "text": "newer"},
+                        {"ts": "1700000001.000000", "user": "U1", "text": "older"},
+                    ],
+                }
+
+        adapter = SlackAdapter({"bot_token": "xoxb-test", "channel_ids": ["C1"]})
+        adapter._client = MockSlackClient()
+        asyncio.run(adapter.poll())
+
+        self.assertEqual(adapter._channel_cursors["C1"], "1700000010.000000")
+
+    def test_multiple_channels(self):
+        """Adapter polls all configured channels."""
+        from unified_brain.adapters.slack import SlackAdapter
+
+        class MockSlackClient:
+            def get(self, method, params=None):
+                ch = params.get("channel", "")
+                return {
+                    "ok": True,
+                    "messages": [
+                        {"ts": f"170000000{ch[-1]}.000001", "user": "U1", "text": f"msg in {ch}"},
+                    ],
+                }
+
+        adapter = SlackAdapter({"bot_token": "xoxb-test", "channel_ids": ["C1", "C2"]})
+        adapter._client = MockSlackClient()
+        events = asyncio.run(adapter.poll())
+
+        self.assertEqual(len(events), 2)
+        channels = {e["channel"] for e in events}
+        self.assertEqual(channels, {"C1", "C2"})
+
+    def test_api_error_handled_gracefully(self):
+        """API errors don't crash the poll — returns empty for that channel."""
+        from unified_brain.adapters.slack import SlackAdapter
+
+        class MockSlackClient:
+            def get(self, method, params=None):
+                return {"ok": False, "error": "channel_not_found"}
+
+        adapter = SlackAdapter({"bot_token": "xoxb-test", "channel_ids": ["C999"]})
+        adapter._client = MockSlackClient()
+        events = asyncio.run(adapter.poll())
+        self.assertEqual(events, [])
+
+    def test_stop_clears_client(self):
+        from unified_brain.adapters.slack import SlackAdapter
+
+        class MockSlackClient:
+            def get(self, method, params=None):
+                return {"ok": True}
+
+        adapter = SlackAdapter({"bot_token": "xoxb-test"})
+        adapter._client = MockSlackClient()
+        asyncio.run(adapter.stop())
+        self.assertIsNone(adapter._client)
+
+
+class TestSlackExecutor(unittest.TestCase):
+    """Tests for Slack respond in ActionExecutor."""
+
+    def test_respond_slack_no_token(self):
+        executor = ActionExecutor({})
+        result = executor.respond_slack("C123", "hello")
+        self.assertEqual(result["status"], "error")
+        self.assertIn("bot_token", result["error"])
+
+    def test_respond_slack_success(self):
+        """Mock successful Slack API response."""
+        import unittest.mock as mock
+
+        executor = ActionExecutor({"slack_bot_token": "xoxb-test"})
+
+        # Mock urlopen to return a successful Slack response
+        mock_response = mock.MagicMock()
+        mock_response.read.return_value = json.dumps({
+            "ok": True,
+            "ts": "1700000001.000001",
+            "channel": "C123",
+        }).encode()
+        mock_response.__enter__ = mock.MagicMock(return_value=mock_response)
+        mock_response.__exit__ = mock.MagicMock(return_value=False)
+
+        with mock.patch("unified_brain.executor.urlopen", return_value=mock_response):
+            result = executor.respond_slack("C123", "test message")
+
+        self.assertEqual(result["status"], "executed")
+        self.assertEqual(result["ts"], "1700000001.000001")
+
+    def test_respond_slack_with_thread(self):
+        """Thread_ts is included in the request."""
+        import unittest.mock as mock
+
+        executor = ActionExecutor({"slack_bot_token": "xoxb-test"})
+
+        mock_response = mock.MagicMock()
+        mock_response.read.return_value = json.dumps({"ok": True, "ts": "123"}).encode()
+        mock_response.__enter__ = mock.MagicMock(return_value=mock_response)
+        mock_response.__exit__ = mock.MagicMock(return_value=False)
+
+        captured_request = {}
+
+        def mock_urlopen(req, **kwargs):
+            captured_request["data"] = json.loads(req.data)
+            return mock_response
+
+        with mock.patch("unified_brain.executor.urlopen", side_effect=mock_urlopen):
+            executor.respond_slack("C123", "reply", thread_ts="1700000001.000001")
+
+        self.assertEqual(captured_request["data"]["thread_ts"], "1700000001.000001")
+
+    def test_respond_slack_api_error(self):
+        """Slack API returns ok=false."""
+        import unittest.mock as mock
+
+        executor = ActionExecutor({"slack_bot_token": "xoxb-test"})
+
+        mock_response = mock.MagicMock()
+        mock_response.read.return_value = json.dumps({
+            "ok": False, "error": "channel_not_found"
+        }).encode()
+        mock_response.__enter__ = mock.MagicMock(return_value=mock_response)
+        mock_response.__exit__ = mock.MagicMock(return_value=False)
+
+        with mock.patch("unified_brain.executor.urlopen", return_value=mock_response):
+            result = executor.respond_slack("C999", "test")
+
+        self.assertEqual(result["status"], "error")
+        self.assertIn("channel_not_found", result["error"])
+
+
+class TestSlackDispatcher(unittest.TestCase):
+    """Tests for Slack routing in ActionDispatcher."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.config = {
+            "outbox_dir": os.path.join(self.tmpdir, "outbox"),
+            "results_dir": os.path.join(self.tmpdir, "inbox"),
+        }
+        self.dispatcher = ActionDispatcher(self.config)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_slack_outbox_created(self):
+        """Slack outbox directory is created on init."""
+        self.assertTrue(self.dispatcher.slack_outbox.exists())
+
+    def test_respond_slack_queued(self):
+        """RESPOND action for slack writes to slack outbox."""
+        action = {
+            "action": RESPOND,
+            "source": "slack",
+            "channel": "C123",
+            "content": "Hello Slack!",
+            "metadata": {"thread_ts": "170.001"},
+        }
+        result = self.dispatcher.dispatch(action)
+        self.assertEqual(result["status"], "queued")
+        self.assertIn("slack:C123", result["target"])
+
+        # Verify outbox file
+        files = list(self.dispatcher.slack_outbox.glob("*.json"))
+        self.assertEqual(len(files), 1)
+        data = json.loads(files[0].read_text())
+        self.assertEqual(data["body"], "Hello Slack!")
+        self.assertEqual(data["channel_id"], "C123")
+        self.assertEqual(data["thread_ts"], "170.001")
+
+    def test_active_respond_slack(self):
+        """Active respond routes to executor.respond_slack."""
+        import unittest.mock as mock
+
+        config = {
+            **self.config,
+            "active_respond": True,
+            "executor": {"slack_bot_token": "xoxb-test"},
+        }
+        dispatcher = ActionDispatcher(config)
+
+        with mock.patch.object(
+            dispatcher.executor, "respond_slack",
+            return_value={"status": "executed", "ts": "123"},
+        ) as mock_respond:
+            result = dispatcher.dispatch({
+                "action": RESPOND,
+                "source": "slack",
+                "channel": "C123",
+                "content": "active test",
+                "metadata": {"thread_ts": "170.001"},
+            })
+
+        mock_respond.assert_called_once_with("C123", "active test", "170.001")
+        self.assertEqual(result["status"], "executed")
+
+
 if __name__ == "__main__":
     unittest.main()
