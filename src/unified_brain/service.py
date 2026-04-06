@@ -16,7 +16,7 @@ from .feedback import FeedbackStore
 from .memory import MemoryManager
 from .metrics import (
     events_ingested, events_processed, brain_decisions,
-    dispatch_results, cycle_duration, cycle_count,
+    dispatch_results, respond_results, cycle_duration, cycle_count,
     adapter_errors, brain_errors,
 )
 from .registry import ProjectRegistry
@@ -86,7 +86,6 @@ class BrainService:
                     dispatch_results.inc(outcome=outcome)
                 elif action.get("action") == "respond":
                     if status == "executed":
-                        from .metrics import respond_results
                         respond_results.inc(outcome="success", source=event.get("source", ""))
                         self.feedback.record(
                             task_id=event.get("id", ""),
@@ -165,7 +164,6 @@ class BrainService:
             log.debug(f"[relay] No channel_context in result {result.get('id')}, skipping relay")
             return
 
-        success = result.get("success", False)
         output = result.get("output", "")
         pr_url = result.get("pr_url", "")
 
