@@ -74,7 +74,7 @@ Webhook/API        ──→  Three-tier Memory           ──DISPATCH──�
 - [x] T021: Archive ccc-central — marked as absorbed, TODO.md updated with redirect
 
 ## Phase 6: Hardening
-- [ ] T022: Optimize store queries — add author filter to recent(), add author index, avoid full scans in context builder
+- [x] T022: Optimize store queries — add author filter to recent(), add author index, avoid full scans in context builder
 
 ## Session Handoff
 All phases complete. PRs #1-6 merged. Service verified working locally.

@@ -105,15 +105,16 @@ class ContextBuilder:
 
     def _author_activity(self, author: str, current_source: str, current_channel: str) -> list[dict]:
         """Recent events by this author in other channels."""
-        # Search for author across all events
-        all_recent = self.store.recent(hours=self.context_hours)
-        author_events = [
-            e for e in all_recent
-            if e.get("author", "").lower() == author.lower()
-            and not (e.get("source") == current_source and e.get("channel") == current_channel)
+        author_events = self.store.recent(
+            hours=self.context_hours, author=author,
+            limit=self.max_author + 10,  # fetch extra to filter current channel
+        )
+        # Exclude events from the current channel
+        filtered = [
+            e for e in author_events
+            if not (e.get("source") == current_source and e.get("channel") == current_channel)
         ]
-        author_events.sort(key=lambda e: e.get("created_at", 0), reverse=True)
-        return self._summarize_events(author_events[:self.max_author])
+        return self._summarize_events(filtered[:self.max_author])
 
     def _summarize_events(self, events: list[dict]) -> list[dict]:
         """Extract key fields for context (not the full event)."""

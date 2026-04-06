@@ -42,6 +42,7 @@ class EventStore:
             CREATE INDEX IF NOT EXISTS idx_events_channel ON events(channel);
             CREATE INDEX IF NOT EXISTS idx_events_created ON events(created_at);
             CREATE INDEX IF NOT EXISTS idx_events_processed ON events(processed);
+            CREATE INDEX IF NOT EXISTS idx_events_author ON events(author COLLATE NOCASE);
 
             CREATE VIRTUAL TABLE IF NOT EXISTS events_fts USING fts5(
                 title, body, author, channel,
@@ -113,8 +114,9 @@ class EventStore:
         ).fetchall()
         return [dict(r) for r in rows]
 
-    def recent(self, hours: int = 24, source: str = None, channel: str = None) -> list[dict]:
-        """Get recent events, optionally filtered by source/channel."""
+    def recent(self, hours: int = 24, source: str = None, channel: str = None,
+               author: str = None, limit: int = 0) -> list[dict]:
+        """Get recent events, optionally filtered by source/channel/author."""
         cutoff = time.time() - (hours * 3600)
         sql = "SELECT * FROM events WHERE created_at > ?"
         params: list = [cutoff]
@@ -124,7 +126,13 @@ class EventStore:
         if channel:
             sql += " AND channel = ?"
             params.append(channel)
+        if author:
+            sql += " AND author = ? COLLATE NOCASE"
+            params.append(author)
         sql += " ORDER BY created_at DESC"
+        if limit:
+            sql += " LIMIT ?"
+            params.append(limit)
         rows = self.conn.execute(sql, params).fetchall()
         return [dict(r) for r in rows]
 
