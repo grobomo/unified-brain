@@ -78,6 +78,10 @@ Webhook/API        ──→  Three-tier Memory           ──DISPATCH──�
 - [x] T023: Fix memory leak in adapters — BoundedSet (10K cap), DRY parse_timestamp in base adapter
 - [x] T024: Registry local overlay — projects.local.json for Teams chat IDs, deep-merged at load
 
+## Phase 7: Intelligence
+- [x] T025: Improve brain LLM prompt — structured memory context, action guidelines, cross-channel awareness
+- [ ] T026: Add README for public repo
+
 ## Session Handoff
 All phases complete. PRs #1-10 merged. Service verified working locally.
 - All source modules: store, brain, context, memory, dispatcher, service, registry, runner, adapters (github + teams)

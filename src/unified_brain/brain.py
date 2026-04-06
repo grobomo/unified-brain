@@ -52,9 +52,16 @@ class BrainAnalyzer:
 
     def _build_prompt(self, event: dict, context: dict = None) -> str:
         parts = [
-            "You are analyzing an event from a multi-channel monitoring system.",
-            "Decide what action to take: RESPOND, DISPATCH, ALERT, or LOG.",
+            "You are the brain of a multi-channel monitoring system that watches GitHub repos and Teams chats.",
+            "Analyze this event and decide what action to take.",
             "",
+            "## Actions",
+            "- RESPOND: Reply in the originating channel (GitHub comment or Teams message). Use for questions, acknowledgments, quick answers.",
+            "- DISPATCH: Send a task to a worker for execution (bug fixes, investigations, code changes). Use for work that needs doing.",
+            "- ALERT: Send an email notification. Use for urgent issues, security events, or things needing human attention.",
+            "- LOG: Record in memory only, no action. Use for routine updates, FYI messages, status reports.",
+            "",
+            "## Event",
             f"Source: {event.get('source')}",
             f"Channel: {event.get('channel')}",
             f"Type: {event.get('event_type')}",
@@ -64,14 +71,54 @@ class BrainAnalyzer:
         ]
 
         if context:
-            parts.append("")
-            parts.append("## Context")
-            parts.append(json.dumps(context, indent=2, default=str)[:2000])
+            # Project context
+            project = context.get("project")
+            if project:
+                parts.append("")
+                parts.append(f"## Project: {project.get('name', 'unknown')}")
+                parts.append(f"Worker type: {project.get('worker_type', 'local')}")
+
+            # Memory (project summary + global patterns)
+            memory = context.get("memory")
+            if memory:
+                if memory.get("project_summary"):
+                    parts.append("")
+                    parts.append("## Project Memory")
+                    parts.append(memory["project_summary"][:1000])
+                if memory.get("global_summary"):
+                    parts.append("")
+                    parts.append("## Global Patterns")
+                    parts.append(memory["global_summary"][:500])
+
+            # Same-channel recent activity
+            same = context.get("same_channel", [])
+            if same:
+                parts.append("")
+                parts.append(f"## Recent in this channel ({len(same)} events)")
+                for e in same[:5]:
+                    parts.append(f"- [{e.get('event_type')}] {e.get('author')}: {e.get('title', '')[:100]}")
+
+            # Cross-channel activity
+            related = context.get("related_channels", [])
+            if related:
+                parts.append("")
+                parts.append(f"## Related channels ({len(related)} events)")
+                for e in related[:5]:
+                    parts.append(f"- [{e.get('source')}/{e.get('channel')}] {e.get('author')}: {e.get('title', '')[:100]}")
+
+            # Author activity across channels
+            author = context.get("author_activity", [])
+            if author:
+                parts.append("")
+                parts.append(f"## This author's other activity ({len(author)} events)")
+                for e in author[:3]:
+                    parts.append(f"- [{e.get('source')}] {e.get('title', '')[:100]}")
 
         parts.extend([
             "",
-            "## Response Format (JSON only)",
-            '{"action": "respond|dispatch|alert|log", "content": "...", "reason": "..."}',
+            "## Response Format",
+            "Reply with ONLY a JSON object, no markdown:",
+            '{"action": "respond|dispatch|alert|log", "content": "message or task description", "reason": "brief explanation"}',
         ])
 
         return "\n".join(parts)
