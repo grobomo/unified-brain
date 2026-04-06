@@ -1,0 +1,29 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: unified-brain
+  labels:
+    app: unified-brain
+spec:
+  podSelector:
+    matchLabels:
+      app: unified-brain
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Health checks from within the cluster
+    - ports:
+        - port: 8790
+          protocol: TCP
+  egress:
+    # DNS resolution
+    - ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    # HTTPS — GitHub API, Anthropic API, MS Graph API
+    - ports:
+        - port: 443
+          protocol: TCP

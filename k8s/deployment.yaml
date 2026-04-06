@@ -31,6 +31,13 @@ spec:
             - secretRef:
                 name: unified-brain-secrets
                 optional: true
+          env:
+            - name: GH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: unified-brain-secrets
+                  key: GITHUB_TOKEN
+                  optional: true
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -67,6 +74,8 @@ spec:
               readOnly: true
             - name: data
               mountPath: /app/data
+            - name: tmp
+              mountPath: /tmp
       volumes:
         - name: config
           configMap:
@@ -74,3 +83,6 @@ spec:
         - name: data
           persistentVolumeClaim:
             claimName: unified-brain-data
+        - name: tmp
+          emptyDir:
+            sizeLimit: 10Mi
