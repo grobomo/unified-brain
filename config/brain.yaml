@@ -15,6 +15,7 @@ dispatcher:
   transport: file
   outbox_dir: data/outbox
   results_dir: data/inbox
+  active_respond: false  # true = post comments/messages directly via API
   # For SQS transport (AWS EC2):
   # transport: sqs
   # sqs_task_queue_url: ${SQS_TASK_QUEUE_URL}

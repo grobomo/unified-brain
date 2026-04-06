@@ -166,6 +166,10 @@ class ActionDispatcher:
     def __init__(self, config: dict = None):
         self.config = config or {}
         self.transport = _create_transport(self.config)
+        self.active_respond = self.config.get("active_respond", False)
+
+        # Lazy-init executor only when active_respond is enabled
+        self._executor = None
 
         # Channel outboxes (always filesystem — these are local agent queues)
         self.outbox_dir = Path(self.config.get("outbox_dir", "data/outbox"))
@@ -200,11 +204,29 @@ class ActionDispatcher:
         else:
             return self._log(action)
 
+    @property
+    def executor(self):
+        if self._executor is None:
+            from .executor import ActionExecutor
+            self._executor = ActionExecutor(self.config.get("executor", {}))
+        return self._executor
+
     def _respond(self, action: dict) -> dict:
-        """Post a response to the originating channel."""
+        """Post a response to the originating channel.
+
+        When active_respond=True, executes immediately via channel API.
+        Falls back to outbox file on failure or when active_respond=False.
+        """
         source = action.get("source", "")
         channel = action.get("channel", "")
         content = action.get("content", "")
+
+        if self.active_respond:
+            result = self._active_respond(source, channel, content, action)
+            if result.get("status") == "executed":
+                return result
+            # Fall through to outbox on failure
+            logger.warning(f"Active respond failed ({result.get('error', '?')}), writing to outbox")
 
         if source == "github":
             return self._respond_github(channel, content, action)
@@ -212,6 +234,15 @@ class ActionDispatcher:
             return self._respond_teams(channel, content, action)
         else:
             return {"status": "unsupported", "source": source}
+
+    def _active_respond(self, source: str, channel: str, content: str, action: dict) -> dict:
+        """Try to execute a RESPOND action directly via channel API."""
+        event_id = action.get("event_id", "")
+        if source == "github":
+            return self.executor.respond_github(channel, event_id, content)
+        elif source == "teams":
+            return self.executor.respond_teams(channel, content)
+        return {"status": "error", "error": f"unsupported source: {source}"}
 
     def _respond_github(self, channel: str, content: str, action: dict) -> dict:
         """Write a GitHub action to the outbox for the GitHub agent to execute."""

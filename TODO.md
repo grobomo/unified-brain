@@ -94,16 +94,16 @@ Brain is the constant. Adapters, LLM backend, dispatchers are pluggable per envi
 - [x] T035: Deploy to RONE K8s — Dockerfile (gh CLI, PYTHONPATH), manifests (API backend, network policy, tmpfs, secret ref), deploy script
 - [x] T036: Deploy to AWS EC2 — CloudFormation (spot instance, SQS queues, IAM, CloudWatch, systemd), deploy script
 
+## Phase 10: Active Actions & Observability
+- [x] T037: Active RESPOND — ActionExecutor posts GitHub comments via `gh api`, Teams messages via Graph API, fallback to outbox
+- [ ] T038: Prometheus metrics — event ingestion rate, brain decisions (LOG/DISPATCH/RESPOND/ALERT counts), dispatch success/failure
+- [ ] T039: Feedback loop — track dispatch outcomes, use success/failure signals to improve brain prompt context
+- [ ] T040: Webhook adapter — HTTP endpoint that accepts events (for integrations beyond polling)
+
 ## Session Handoff
-PRs #1-16 merged. CI green. Brain service RUNNING LOCALLY (PID in data/brain.pid).
-- SERVICE IS LIVE: interval=3s, health on :8790, both adapters connected
-- GitHub adapter: self-contained via `gh` CLI, polling 8 repos, 554+ events ingested
-- Teams adapter: self-contained via stdlib urllib, token_path auth, watching 3 chats, 47+ events
-- Brain: pluggable LLM backend (subprocess/api), analyzing events, mostly LOG for routine CI
-- Dispatcher: pluggable transport — FileTransport (default) or SQSTransport (AWS), config-driven
-- 601+ events in unified store, 426+ processed by brain
-- 57 tests passing (10 new for transport factory + SQS mock)
-- Spec: specs/005-portable-deployment/SPEC.md
-- All Phase 9 tasks complete (T030-T036). Portable deployment: local, K8s, EC2.
-- Dependencies removed: no more github-agent, teams-agent, or msgraph-lib imports needed
-- The `requirements.txt` is empty — pure stdlib + `gh` CLI. Add `boto3` for SQS transport.
+PRs #1-20 merged. CI green. All 36 tasks (T001-T036) complete across 9 phases.
+- SERVICE IS LIVE locally: interval=3s, health on :8790, both adapters connected
+- Architecture: pluggable adapters, LLM backend (subprocess/api), dispatcher transport (file/SQS)
+- 601+ events in store, 57 tests passing, zero external deps for core
+- Deployment artifacts: Dockerfile, K8s manifests (kustomize), CloudFormation (EC2 spot + SQS)
+- Next: T037-T040 (active RESPOND, metrics, feedback loop, webhook adapter)
