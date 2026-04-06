@@ -102,9 +102,10 @@ Brain is the constant. Adapters, LLM backend, dispatchers are pluggable per envi
 - [x] T039: Feedback loop — FeedbackStore (SQLite), records dispatch/respond outcomes, summary stats in brain prompt, 80 tests
 - [x] T040: Webhook adapter — HTTP server, POST /events + /events/raw + GET /events/stats, HMAC verification, 88 tests
 
-## Phase 11: Code Quality
+## Phase 11: Code Quality & Packaging
 - [x] T041: Cleanup — move respond_results import to module level, remove duplicate variable in _relay_result
 - [x] T042: Update docs — README reflects 88 tests, webhook adapter, metrics, feedback, active respond; TODO "What exists" updated
+- [x] T043: Docker Compose + monitoring — docker-compose.yaml (brain + Prometheus + Grafana), Grafana dashboard, .env.example
 
 ## Session Handoff
 PRs #1-24 merged. CI green. 40 tasks done (T001-T040), Phase 10 complete.
