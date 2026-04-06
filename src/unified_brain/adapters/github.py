@@ -12,7 +12,7 @@ import sys
 import time
 from typing import Optional
 
-from .base import ChannelAdapter
+from .base import ChannelAdapter, BoundedSet, parse_timestamp
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +36,7 @@ class GitHubAdapter(ChannelAdapter):
         self.accounts = self.config.get("accounts", ["grobomo"])
         self.repos = self.config.get("repos")  # None = discover all
         self._pollers = {}
-        self._seen_ids: set[str] = set()
+        self._seen_ids = BoundedSet()
 
     @property
     def source(self) -> str:
@@ -116,18 +116,6 @@ class GitHubAdapter(ChannelAdapter):
 
     def _to_event(self, norm: dict) -> dict:
         """Convert github-agent normalized format to unified-brain EventStore format."""
-        ts = norm.get("timestamp", "")
-        if isinstance(ts, str) and ts:
-            # ISO 8601 to unix timestamp
-            try:
-                from datetime import datetime, timezone
-                dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
-                created_at = dt.timestamp()
-            except (ValueError, TypeError):
-                created_at = time.time()
-        else:
-            created_at = time.time()
-
         return {
             "id": norm.get("event_id", f"gh-{int(time.time() * 1000)}"),
             "source": "github",
@@ -136,6 +124,6 @@ class GitHubAdapter(ChannelAdapter):
             "author": norm.get("actor", ""),
             "title": norm.get("title", ""),
             "body": norm.get("body", ""),
-            "created_at": created_at,
+            "created_at": parse_timestamp(norm.get("timestamp", "")),
             "metadata": norm.get("metadata", {}),
         }

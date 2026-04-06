@@ -12,7 +12,7 @@ import sys
 import time
 from typing import Optional
 
-from .base import ChannelAdapter
+from .base import ChannelAdapter, BoundedSet, parse_timestamp
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +39,7 @@ class TeamsAdapter(ChannelAdapter):
         self.chat_ids = self.config.get("chat_ids", [])
         self.poll_count = self.config.get("messages_per_poll", 20)
         self._client = None
-        self._seen_ids: set[str] = set()
+        self._seen_ids = BoundedSet()
 
     @property
     def source(self) -> str:
@@ -90,17 +90,6 @@ class TeamsAdapter(ChannelAdapter):
 
     def _to_event(self, parsed: dict, chat_id: str) -> dict:
         """Convert teams-agent parsed message to EventStore format."""
-        ts = parsed.get("timestamp", "")
-        if isinstance(ts, str) and ts:
-            try:
-                from datetime import datetime, timezone
-                dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
-                created_at = dt.timestamp()
-            except (ValueError, TypeError):
-                created_at = time.time()
-        else:
-            created_at = time.time()
-
         return {
             "id": f"teams:{chat_id[:20]}:{parsed.get('message_id', '')}",
             "source": "teams",
@@ -109,7 +98,7 @@ class TeamsAdapter(ChannelAdapter):
             "author": parsed.get("sender_name", "unknown"),
             "title": parsed.get("text", "")[:100],
             "body": parsed.get("text", ""),
-            "created_at": created_at,
+            "created_at": parse_timestamp(parsed.get("timestamp", "")),
             "metadata": {
                 "sender_id": parsed.get("sender_id", ""),
                 "message_id": parsed.get("message_id", ""),

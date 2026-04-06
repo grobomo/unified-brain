@@ -75,12 +75,12 @@ Webhook/API        ──→  Three-tier Memory           ──DISPATCH──�
 
 ## Phase 6: Hardening
 - [x] T022: Optimize store queries — add author filter to recent(), add author index, avoid full scans in context builder
-- [ ] T023: Fix memory leak in adapters — bounded _seen_ids, DRY timestamp parsing into base adapter
+- [x] T023: Fix memory leak in adapters — BoundedSet (10K cap), DRY parse_timestamp in base adapter
 
 ## Session Handoff
 All phases complete. PRs #1-6 merged. Service verified working locally.
 - All source modules: store, brain, context, memory, dispatcher, service, registry, runner, adapters (github + teams)
-- 35 integration tests passing
+- 41 integration tests passing
 - Live run: 331 GitHub events + 47 Teams messages ingested
 - Config overlay: brain.local.yaml for secrets (chat IDs), gitignored
 - ccc-manager bridge: config/unified-brain.yaml in ccc-manager, verified working
