@@ -156,6 +156,44 @@ class TestBrainAnalyzer(unittest.TestCase):
         action = brain.analyze(event)
         self.assertEqual(action["action"], LOG)
 
+    def test_prompt_includes_structured_context(self):
+        brain = BrainAnalyzer()
+        event = {
+            "source": "github",
+            "channel": "grobomo/test-repo",
+            "event_type": "issue",
+            "author": "dev1",
+            "title": "Fix login flow",
+            "body": "Login is broken",
+        }
+        context = {
+            "project": {"name": "test-project", "worker_type": "k8s"},
+            "memory": {
+                "project_summary": "Active project with frequent PRs",
+                "global_summary": "Pattern: login issues spike on Mondays",
+            },
+            "same_channel": [
+                {"event_type": "pr", "author": "dev2", "title": "Refactor auth module"},
+            ],
+            "related_channels": [
+                {"source": "teams", "channel": "chat-123", "author": "dev1", "title": "Discussed login fix"},
+            ],
+            "author_activity": [
+                {"source": "teams", "title": "Asked about auth tokens"},
+            ],
+        }
+        prompt = brain._build_prompt(event, context)
+        self.assertIn("## Project: test-project", prompt)
+        self.assertIn("Worker type: k8s", prompt)
+        self.assertIn("## Project Memory", prompt)
+        self.assertIn("Active project with frequent PRs", prompt)
+        self.assertIn("## Global Patterns", prompt)
+        self.assertIn("## Recent in this channel", prompt)
+        self.assertIn("## Related channels", prompt)
+        self.assertIn("## This author's other activity", prompt)
+        self.assertIn("RESPOND", prompt)
+        self.assertIn("DISPATCH", prompt)
+
 
 class TestDispatcher(unittest.TestCase):
     def setUp(self):
