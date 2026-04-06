@@ -76,7 +76,7 @@ Webhook/API        ──→  Three-tier Memory           ──DISPATCH──�
 ## Phase 6: Hardening
 - [x] T022: Optimize store queries — add author filter to recent(), add author index, avoid full scans in context builder
 - [x] T023: Fix memory leak in adapters — BoundedSet (10K cap), DRY parse_timestamp in base adapter
-- [ ] T024: Registry local overlay — projects.local.json for Teams chat IDs, deep-merged at load
+- [x] T024: Registry local overlay — projects.local.json for Teams chat IDs, deep-merged at load
 
 ## Session Handoff
 All phases complete. PRs #1-6 merged. Service verified working locally.
