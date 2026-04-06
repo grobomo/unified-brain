@@ -13,6 +13,11 @@ from .brain import BrainAnalyzer, RESPOND
 from .context import ContextBuilder
 from .dispatcher import ActionDispatcher
 from .memory import MemoryManager
+from .metrics import (
+    events_ingested, events_processed, brain_decisions,
+    dispatch_results, cycle_duration, cycle_count,
+    adapter_errors, brain_errors,
+)
 from .registry import ProjectRegistry
 
 log = logging.getLogger("unified-brain")
@@ -45,6 +50,8 @@ class BrainService:
 
     async def run_cycle(self):
         """Run one poll-analyze-dispatch cycle."""
+        t0 = time.monotonic()
+
         # 1. Poll all adapters for new events
         for adapter in self.adapters:
             try:
@@ -52,8 +59,10 @@ class BrainService:
                 for event in events:
                     self.store.insert(event)
                 if events:
+                    events_ingested.inc(len(events), adapter=adapter.name)
                     log.info(f"[{adapter.name}] Ingested {len(events)} events")
             except Exception as e:
+                adapter_errors.inc(adapter=adapter.name)
                 log.error(f"[{adapter.name}] Poll error: {e}")
 
         # 2. Process unprocessed events through brain
@@ -63,10 +72,23 @@ class BrainService:
                 # Build cross-channel context (same project, same author)
                 context = self.context_builder.build(event)
                 action = self.brain.analyze(event, context)
-                self.dispatcher.dispatch(action)
+                result = self.dispatcher.dispatch(action)
                 self.store.mark_processed(event["id"])
+                events_processed.inc(source=event.get("source", "unknown"))
+                brain_decisions.inc(action=action.get("action", "log"))
+
+                # Track dispatch outcomes
+                status = result.get("status", "") if isinstance(result, dict) else ""
+                if action.get("action") == "dispatch":
+                    outcome = "success" if status == "dispatched" else "failure"
+                    dispatch_results.inc(outcome=outcome)
+                elif action.get("action") == "respond" and status == "executed":
+                    from .metrics import respond_results
+                    respond_results.inc(outcome="success", source=event.get("source", ""))
+
                 log.info(f"[brain] {event['id']} -> {action.get('action')}")
             except Exception as e:
+                brain_errors.inc()
                 log.error(f"[brain] Error processing {event.get('id')}: {e}")
 
         # 3. Check for results from ccc-manager and relay to originating channels
@@ -86,6 +108,10 @@ class BrainService:
                 log.debug("[memory] Compaction complete")
             except Exception as e:
                 log.error(f"[memory] Compaction error: {e}")
+
+        elapsed = time.monotonic() - t0
+        cycle_duration.set(elapsed)
+        cycle_count.inc()
 
     async def start(self):
         """Start the service loop."""

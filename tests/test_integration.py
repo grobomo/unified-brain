@@ -1050,5 +1050,130 @@ class TestActiveRespond(unittest.TestCase):
         self.assertEqual(len(teams_files), 0)
 
 
+class TestMetrics(unittest.TestCase):
+    """Tests for Prometheus metrics module (T038)."""
+
+    def setUp(self):
+        from unified_brain.metrics import MetricsRegistry
+        MetricsRegistry.reset()
+
+    def test_counter_inc_and_get(self):
+        from unified_brain.metrics import Counter
+        c = Counter("test_counter", "A test counter")
+        self.assertEqual(c.get(), 0.0)
+        c.inc()
+        self.assertEqual(c.get(), 1.0)
+        c.inc(5)
+        self.assertEqual(c.get(), 6.0)
+
+    def test_counter_with_labels(self):
+        from unified_brain.metrics import Counter
+        c = Counter("test_labeled", "Labeled counter")
+        c.inc(action="log")
+        c.inc(action="dispatch")
+        c.inc(action="log")
+        self.assertEqual(c.get(action="log"), 2.0)
+        self.assertEqual(c.get(action="dispatch"), 1.0)
+        self.assertEqual(c.get(action="respond"), 0.0)
+
+    def test_gauge_set_and_get(self):
+        from unified_brain.metrics import Gauge
+        g = Gauge("test_gauge", "A test gauge")
+        g.set(42.5)
+        self.assertEqual(g.get(), 42.5)
+        g.set(0)
+        self.assertEqual(g.get(), 0.0)
+
+    def test_gauge_inc(self):
+        from unified_brain.metrics import Gauge
+        g = Gauge("test_gauge_inc", "Incrementable gauge")
+        g.inc(3)
+        g.inc(2)
+        self.assertEqual(g.get(), 5.0)
+
+    def test_expose_format(self):
+        from unified_brain.metrics import Counter
+        c = Counter("http_requests_total", "Total HTTP requests")
+        c.inc(method="GET", status="200")
+        c.inc(method="POST", status="201")
+        text = c.expose()
+        self.assertIn("# HELP http_requests_total Total HTTP requests", text)
+        self.assertIn("# TYPE http_requests_total counter", text)
+        self.assertIn('method="GET"', text)
+        self.assertIn('status="200"', text)
+        self.assertIn('method="POST"', text)
+
+    def test_registry_expose(self):
+        from unified_brain.metrics import MetricsRegistry, Counter
+        reg = MetricsRegistry()
+        c = reg.register(Counter("reg_test", "Registry test"))
+        c.inc(source="github")
+        output = reg.expose()
+        self.assertIn("reg_test", output)
+        self.assertIn("brain_uptime_seconds", output)
+
+    def test_global_metrics_exist(self):
+        """Global metric instances are importable and functional."""
+        from unified_brain import metrics
+        metrics.events_ingested.inc(adapter="github")
+        metrics.brain_decisions.inc(action="log")
+        metrics.cycle_duration.set(0.5)
+        self.assertEqual(metrics.events_ingested.get(adapter="github"), 1.0)
+        self.assertEqual(metrics.brain_decisions.get(action="log"), 1.0)
+        self.assertEqual(metrics.cycle_duration.get(), 0.5)
+
+    def test_service_cycle_increments_metrics(self):
+        """BrainService.run_cycle increments metrics counters."""
+        # Import the same metric objects the service module uses
+        from unified_brain.metrics import (
+            events_ingested, cycle_count, cycle_duration, events_processed,
+        )
+
+        # Record baseline values (other tests may have incremented)
+        baseline_ingested = events_ingested.get(adapter="test-metrics")
+        baseline_cycles = cycle_count.get()
+
+        tmpdir = tempfile.mkdtemp()
+        try:
+            config = {
+                "db_path": os.path.join(tmpdir, "test.db"),
+                "brain": {"claude_path": "nonexistent-claude"},
+                "dispatcher": {
+                    "outbox_dir": os.path.join(tmpdir, "outbox"),
+                    "results_dir": os.path.join(tmpdir, "inbox"),
+                },
+                "registry_path": os.path.join(tmpdir, "projects.yaml"),
+            }
+            service = BrainService(config)
+
+            # Add a mock adapter that returns one event
+            class MockAdapter:
+                name = "test-metrics"
+                async def poll(self):
+                    return [{
+                        "id": f"metric-test-{time.time_ns()}",
+                        "source": "github",
+                        "channel": "grobomo/repo",
+                        "event_type": "push",
+                        "author": "bot",
+                        "title": "Test event",
+                        "body": "routine push",
+                        "created_at": "2026-04-06T00:00:00Z",
+                    }]
+                async def start(self): pass
+                async def stop(self): pass
+
+            service.add_adapter(MockAdapter())
+            asyncio.run(service.run_cycle())
+
+            # Check that metrics were incremented from baseline
+            self.assertGreater(events_ingested.get(adapter="test-metrics"), baseline_ingested)
+            self.assertGreater(cycle_count.get(), baseline_cycles)
+            self.assertGreater(cycle_duration.get(), 0)
+        finally:
+            service.store.close()
+            shutil.rmtree(tmpdir)
+
+
 if __name__ == "__main__":
     unittest.main()
