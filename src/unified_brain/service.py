@@ -10,7 +10,9 @@ import time
 
 from .store import EventStore
 from .brain import BrainAnalyzer, RESPOND
+from .context import ContextBuilder
 from .dispatcher import ActionDispatcher
+from .memory import MemoryManager
 from .registry import ProjectRegistry
 
 log = logging.getLogger("unified-brain")
@@ -25,8 +27,15 @@ class BrainService:
         self.brain = BrainAnalyzer(self.config.get("brain", {}))
         self.dispatcher = ActionDispatcher(self.config.get("dispatcher", {}))
         self.registry = ProjectRegistry(self.config.get("registry_path", "config/projects.yaml"))
+        self.memory = MemoryManager(self.store.conn, self.config.get("memory", {}))
+        self.context_builder = ContextBuilder(
+            self.store, self.registry, self.config.get("context", {}),
+            memory=self.memory,
+        )
         self.adapters = []
         self.interval = self.config.get("interval", 60)
+        self._cycle_count = 0
+        self._compact_interval = self.config.get("compact_every_n_cycles", 10)
         self.running = False
 
     def add_adapter(self, adapter):
@@ -50,10 +59,8 @@ class BrainService:
         events = self.store.get_unprocessed()
         for event in events:
             try:
-                # Build context from recent events in same channel
-                context = {
-                    "recent": self.store.recent(hours=24, channel=event["channel"]),
-                }
+                # Build cross-channel context (same project, same author)
+                context = self.context_builder.build(event)
                 action = self.brain.analyze(event, context)
                 self.dispatcher.dispatch(action)
                 self.store.mark_processed(event["id"])
@@ -68,6 +75,16 @@ class BrainService:
             task_id = result.get("id", "?")
             log.info(f"[result] Task {task_id}: {'success' if success else 'failed'}")
             self._relay_result(result)
+
+        # 4. Periodic memory compaction
+        self._cycle_count += 1
+        if self._cycle_count % self._compact_interval == 0:
+            try:
+                self.memory.compact_tier2(self.store, self.registry)
+                self.memory.compact_tier3(self.registry)
+                log.debug("[memory] Compaction complete")
+            except Exception as e:
+                log.error(f"[memory] Compaction error: {e}")
 
     async def start(self):
         """Start the service loop."""

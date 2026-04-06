@@ -17,8 +17,10 @@ import unittest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from unified_brain.store import EventStore
-from unified_brain.brain import BrainAnalyzer, DISPATCH, LOG
+from unified_brain.brain import BrainAnalyzer, DISPATCH, LOG, RESPOND, ALERT
+from unified_brain.context import ContextBuilder
 from unified_brain.dispatcher import ActionDispatcher
+from unified_brain.memory import MemoryManager
 from unified_brain.registry import ProjectRegistry
 from unified_brain.service import BrainService
 from unified_brain.adapters.base import ChannelAdapter
@@ -159,7 +161,7 @@ class TestDispatcher(unittest.TestCase):
         self.outbox = os.path.join(self.tmpdir, "outbox")
         self.inbox = os.path.join(self.tmpdir, "inbox")
         self.dispatcher = ActionDispatcher({
-            "bridge_dir": self.outbox,
+            "outbox_dir": self.outbox,
             "results_dir": self.inbox,
         })
 
@@ -262,7 +264,7 @@ class TestServiceIntegration(unittest.TestCase):
             service = BrainService({
                 "db_path": db_path,
                 "brain": {"claude_path": "nonexistent"},  # force fallback
-                "dispatcher": {"bridge_dir": outbox, "results_dir": inbox},
+                "dispatcher": {"outbox_dir": outbox, "results_dir": inbox},
                 "interval": 1,
             })
 
@@ -314,6 +316,269 @@ class TestServiceIntegration(unittest.TestCase):
         finally:
             service.store.close()
             shutil.rmtree(tmpdir)
+
+
+class TestContextBuilder(unittest.TestCase):
+    """Tests for cross-channel context (T011)."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.db_path = os.path.join(self.tmpdir, "test.db")
+        self.store = EventStore(self.db_path)
+        self.reg_path = os.path.join(self.tmpdir, "projects.json")
+        with open(self.reg_path, "w") as f:
+            json.dump({
+                "projects": {
+                    "myproject": {
+                        "repos": ["grobomo/myrepo", "grobomo/other-repo"],
+                        "teams_chats": ["19:chat123@thread.v2"],
+                        "people": ["alice", "bob"],
+                    }
+                }
+            }, f)
+        self.registry = ProjectRegistry(self.reg_path)
+        self.builder = ContextBuilder(self.store, self.registry)
+
+    def tearDown(self):
+        self.store.close()
+        shutil.rmtree(self.tmpdir)
+
+    def test_same_channel_context(self):
+        """Events from the same channel appear in context."""
+        self.store.insert({
+            "id": "gh-1", "source": "github", "channel": "grobomo/myrepo",
+            "event_type": "push", "author": "alice", "title": "Push to main",
+            "created_at": time.time(),
+        })
+        event = {
+            "id": "gh-2", "source": "github", "channel": "grobomo/myrepo",
+            "event_type": "issue", "author": "bob", "title": "Bug",
+        }
+        ctx = self.builder.build(event)
+        self.assertGreaterEqual(len(ctx["same_channel"]), 1)
+
+    def test_related_channels_cross_source(self):
+        """Events from a Teams chat in the same project appear as related."""
+        # Insert a Teams event
+        self.store.insert({
+            "id": "teams-1", "source": "teams", "channel": "19:chat123@thread.v2",
+            "event_type": "message", "author": "alice", "title": "Discussed deploy",
+            "body": "Deploy is failing in staging",
+            "created_at": time.time(),
+        })
+        # Analyze a GitHub event in the same project
+        event = {
+            "id": "gh-3", "source": "github", "channel": "grobomo/myrepo",
+            "event_type": "issue", "author": "bob", "title": "Deploy broken",
+        }
+        ctx = self.builder.build(event)
+        self.assertGreaterEqual(len(ctx["related_channels"]), 1)
+        self.assertEqual(ctx["related_channels"][0]["source"], "teams")
+
+    def test_related_channels_same_source_different_repo(self):
+        """Events from another repo in the same project appear as related."""
+        self.store.insert({
+            "id": "gh-10", "source": "github", "channel": "grobomo/other-repo",
+            "event_type": "pr", "author": "alice", "title": "Fix for other-repo",
+            "created_at": time.time(),
+        })
+        event = {
+            "id": "gh-11", "source": "github", "channel": "grobomo/myrepo",
+            "event_type": "issue", "author": "bob", "title": "Related issue",
+        }
+        ctx = self.builder.build(event)
+        self.assertGreaterEqual(len(ctx["related_channels"]), 1)
+        self.assertEqual(ctx["related_channels"][0]["channel"], "grobomo/other-repo")
+
+    def test_author_activity_cross_channel(self):
+        """Events by the same author in different channels appear."""
+        self.store.insert({
+            "id": "teams-2", "source": "teams", "channel": "19:other@thread.v2",
+            "event_type": "message", "author": "alice", "title": "Another chat",
+            "created_at": time.time(),
+        })
+        event = {
+            "id": "gh-4", "source": "github", "channel": "grobomo/myrepo",
+            "event_type": "issue", "author": "alice", "title": "New issue",
+        }
+        ctx = self.builder.build(event)
+        self.assertGreaterEqual(len(ctx["author_activity"]), 1)
+        self.assertEqual(ctx["author_activity"][0]["author"], "alice")
+
+    def test_project_info_in_context(self):
+        """Project metadata appears when channel is in registry."""
+        event = {
+            "id": "gh-5", "source": "github", "channel": "grobomo/myrepo",
+            "event_type": "push", "author": "bob",
+        }
+        ctx = self.builder.build(event)
+        self.assertIsNotNone(ctx["project"])
+        self.assertEqual(ctx["project"]["name"], "myproject")
+
+    def test_unknown_channel_no_project(self):
+        """Events from unknown channels get no project context."""
+        event = {
+            "id": "gh-6", "source": "github", "channel": "unknown/repo",
+            "event_type": "push", "author": "eve",
+        }
+        ctx = self.builder.build(event)
+        self.assertIsNone(ctx["project"])
+        self.assertEqual(ctx["related_channels"], [])
+
+
+class TestMemoryManager(unittest.TestCase):
+    """Tests for three-tier memory (T012)."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.db_path = os.path.join(self.tmpdir, "test.db")
+        self.store = EventStore(self.db_path)
+        self.memory = MemoryManager(self.store.conn)
+        self.reg_path = os.path.join(self.tmpdir, "projects.json")
+        with open(self.reg_path, "w") as f:
+            json.dump({
+                "projects": {
+                    "proj-a": {
+                        "repos": ["grobomo/repo-a"],
+                        "teams_chats": [],
+                        "people": [],
+                    },
+                    "proj-b": {
+                        "repos": ["grobomo/repo-b"],
+                        "teams_chats": [],
+                        "people": [],
+                    },
+                }
+            }, f)
+        self.registry = ProjectRegistry(self.reg_path)
+
+    def tearDown(self):
+        self.store.close()
+        shutil.rmtree(self.tmpdir)
+
+    def test_project_memory_roundtrip(self):
+        self.memory.set_project_memory("proj-a", "notes", {"key": "value"})
+        mem = self.memory.get_project_memory("proj-a")
+        self.assertEqual(mem["notes"]["key"], "value")
+
+    def test_global_memory_roundtrip(self):
+        self.memory.set_global_memory("config", {"active": True})
+        val = self.memory.get_global_memory("config")
+        self.assertTrue(val["active"])
+
+    def test_compact_tier2(self):
+        """Tier 2 compaction creates project summaries from events."""
+        self.store.insert({
+            "id": "a-1", "source": "github", "channel": "grobomo/repo-a",
+            "event_type": "issue", "author": "alice", "created_at": time.time(),
+        })
+        self.store.insert({
+            "id": "a-2", "source": "github", "channel": "grobomo/repo-a",
+            "event_type": "pr", "author": "bob", "created_at": time.time(),
+        })
+        self.memory.compact_tier2(self.store, self.registry)
+        mem = self.memory.get_project_memory("proj-a")
+        summary = mem.get("summary", {})
+        self.assertEqual(summary["event_count"], 2)
+        self.assertIn("alice", summary["authors"])
+        self.assertIn("bob", summary["authors"])
+
+    def test_compact_tier3(self):
+        """Tier 3 compaction aggregates project summaries into global."""
+        # Set up tier 2 summaries
+        self.memory.set_project_memory("proj-a", "summary", {
+            "event_count": 5, "authors": ["alice"], "event_types": {"issue": 5},
+            "channels_active": ["github:grobomo/repo-a"],
+        })
+        self.memory.set_project_memory("proj-b", "summary", {
+            "event_count": 3, "authors": ["bob"], "event_types": {"pr": 3},
+            "channels_active": ["github:grobomo/repo-b"],
+        })
+        self.memory.compact_tier3(self.registry)
+        global_mem = self.memory.get_global_memory("summary")
+        self.assertEqual(global_mem["total_events"], 8)
+        self.assertEqual(global_mem["active_projects"], 2)
+        self.assertEqual(global_mem["most_active"], "proj-a")
+
+    def test_get_context_for_project(self):
+        self.memory.set_project_memory("proj-a", "summary", {"event_count": 10})
+        self.memory.set_global_memory("summary", {"total_events": 100})
+        ctx = self.memory.get_context_for_project("proj-a")
+        self.assertIn("project_memory", ctx)
+        self.assertIn("global_memory", ctx)
+        self.assertEqual(ctx["project_memory"]["summary"]["event_count"], 10)
+
+
+class TestOutboxProtocol(unittest.TestCase):
+    """Tests for action relay outbox protocol (T013)."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.dispatcher = ActionDispatcher({
+            "outbox_dir": os.path.join(self.tmpdir, "outbox"),
+            "results_dir": os.path.join(self.tmpdir, "inbox"),
+        })
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir)
+
+    def test_github_respond_writes_outbox(self):
+        action = {
+            "action": RESPOND, "source": "github", "channel": "grobomo/repo",
+            "event_id": "issue-42", "content": "This is fixed in PR #43",
+        }
+        result = self.dispatcher.dispatch(action)
+        self.assertEqual(result["status"], "queued")
+        files = list(self.dispatcher.github_outbox.glob("*.json"))
+        self.assertEqual(len(files), 1)
+        entry = json.loads(files[0].read_text())
+        self.assertEqual(entry["action"], "comment")
+        self.assertEqual(entry["repo"], "grobomo/repo")
+        self.assertIn("This is fixed", entry["body"])
+
+    def test_teams_respond_writes_outbox(self):
+        action = {
+            "action": RESPOND, "source": "teams", "channel": "19:abc@thread.v2",
+            "content": "Looking into this now",
+        }
+        result = self.dispatcher.dispatch(action)
+        self.assertEqual(result["status"], "queued")
+        files = list(self.dispatcher.teams_outbox.glob("*.json"))
+        self.assertEqual(len(files), 1)
+        entry = json.loads(files[0].read_text())
+        self.assertEqual(entry["action"], "reply")
+        self.assertEqual(entry["chat_id"], "19:abc@thread.v2")
+
+    def test_alert_writes_email_outbox(self):
+        action = {
+            "action": ALERT, "source": "github", "channel": "grobomo/repo",
+            "event_id": "evt-1", "content": "Critical: deploy failed",
+        }
+        result = self.dispatcher.dispatch(action)
+        self.assertEqual(result["status"], "queued")
+        files = list(self.dispatcher.email_outbox.glob("*.json"))
+        self.assertEqual(len(files), 1)
+        entry = json.loads(files[0].read_text())
+        self.assertEqual(entry["action"], "email")
+        self.assertIn("deploy failed", entry["body"])
+
+    def test_dispatch_still_writes_bridge(self):
+        """DISPATCH action still writes to bridge directory for ccc-manager."""
+        action = {
+            "action": DISPATCH, "source": "github", "channel": "grobomo/repo",
+            "event_id": "evt-2", "content": "Fix the bug",
+        }
+        result = self.dispatcher.dispatch(action)
+        self.assertEqual(result["status"], "dispatched")
+        files = list(self.dispatcher.bridge_dir.glob("*.json"))
+        self.assertEqual(len(files), 1)
+
+    def test_outbox_directory_structure(self):
+        """Verify outbox directory structure exists."""
+        self.assertTrue(self.dispatcher.github_outbox.exists())
+        self.assertTrue(self.dispatcher.teams_outbox.exists())
+        self.assertTrue(self.dispatcher.email_outbox.exists())
+        self.assertTrue(self.dispatcher.bridge_dir.exists())
 
 
 if __name__ == "__main__":

@@ -51,9 +51,9 @@ Webhook/API        ──→  Three-tier Memory           ──DISPATCH──�
 - [x] T010: Integration test — 15 tests covering store, brain, dispatcher, registry, and full E2E pipeline
 
 ## Phase 3: Cross-Channel Intelligence
-- [ ] T011: Cross-channel context — when analyzing a GitHub event, include relevant Teams context (same person, same project) and vice versa
-- [ ] T012: Unified memory — single three-tier memory system spanning all channels
-- [ ] T013: Action relay protocol — brain writes action commands to channel-specific outbox folders. Each channel agent polls its outbox and executes (gh comment, Teams reply, email).
+- [x] T011: Cross-channel context — ContextBuilder enriches brain with same-project + same-author events across channels
+- [x] T012: Unified memory — MemoryManager with Tier 1 (hot events), Tier 2 (project summaries), Tier 3 (global patterns), compaction
+- [x] T013: Action relay protocol — outbox model (github/, teams/, email/, dispatch/) with JSON action files
 
 ## Phase 4: Deployment
 - [ ] T014: Silent service deployment — Cross-platform design, process guard (port from github-agent)
@@ -68,10 +68,11 @@ Webhook/API        ──→  Three-tier Memory           ──DISPATCH──�
 - msgraph-lib at `~/Documents/ProjectsCL1/msgraph-lib/` — shared MS Graph token management
 
 ## Session Handoff
-Phase 1+2 complete. PR #1 open. Branch: 001-T001-project-foundation.
-- All source modules built: store, brain, dispatcher, service, registry, adapters (github + teams)
-- 15 integration tests passing
+Phase 1-3 complete. PR #1 open. Branch: 001-T001-project-foundation.
+- All source modules: store, brain, context, memory, dispatcher, service, registry, adapters (github + teams)
+- 31 integration tests passing (15 Phase 1-2 + 16 Phase 3)
+- New modules: context.py (cross-channel context builder), memory.py (three-tier memory), outbox model in dispatcher
 - PR: https://github.com/grobomo/unified-brain/pull/1
 - ccc-manager TODO.md updated with Phase 50 integration tasks (T181-T184)
 - ccc-central should be archived (absorbed into this project + ccc-manager)
-- Next: Phase 3 (cross-channel intelligence T011-T013), then implement RESPOND actions (gh CLI, teams_chat.py)
+- Next: Phase 4 (deployment T014-T017), then merge PR #1

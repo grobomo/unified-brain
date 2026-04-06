@@ -14,13 +14,30 @@ from .brain import RESPOND, DISPATCH, ALERT, LOG
 
 
 class ActionDispatcher:
-    """Routes actions from the brain to their targets."""
+    """Routes actions from the brain to their targets.
+
+    Uses an outbox model for channel actions:
+      data/outbox/dispatch/ — tasks for ccc-manager
+      data/outbox/github/  — GitHub actions (comment, label, close)
+      data/outbox/teams/   — Teams actions (reply, mention)
+      data/outbox/email/   — Email actions (alert, notify)
+    Each channel agent polls its outbox folder and executes.
+    """
 
     def __init__(self, config: dict = None):
         self.config = config or {}
+        # Base outbox directory
+        self.outbox_dir = Path(self.config.get("outbox_dir", "data/outbox"))
         # Bridge directory for ccc-manager integration
-        self.bridge_dir = Path(self.config.get("bridge_dir", "data/outbox"))
+        self.bridge_dir = self.outbox_dir / "dispatch"
         self.bridge_dir.mkdir(parents=True, exist_ok=True)
+        # Channel outboxes
+        self.github_outbox = self.outbox_dir / "github"
+        self.github_outbox.mkdir(parents=True, exist_ok=True)
+        self.teams_outbox = self.outbox_dir / "teams"
+        self.teams_outbox.mkdir(parents=True, exist_ok=True)
+        self.email_outbox = self.outbox_dir / "email"
+        self.email_outbox.mkdir(parents=True, exist_ok=True)
         # Results directory (ccc-manager writes results here)
         self.results_dir = Path(self.config.get("results_dir", "data/inbox"))
         self.results_dir.mkdir(parents=True, exist_ok=True)
@@ -52,14 +69,34 @@ class ActionDispatcher:
             return {"status": "unsupported", "source": source}
 
     def _respond_github(self, channel: str, content: str, action: dict) -> dict:
-        """Post a GitHub comment. Requires gh CLI."""
-        # TODO: Implement via gh CLI or GitHub API
-        return {"status": "pending", "target": f"github:{channel}"}
+        """Write a GitHub action to the outbox for the GitHub agent to execute."""
+        action_id = f"gh-{int(time.time() * 1000)}"
+        event_id = action.get("event_id", "")
+        outbox_entry = {
+            "id": action_id,
+            "action": "comment",
+            "repo": channel,
+            "event_id": event_id,
+            "body": content,
+            "created_at": time.time(),
+        }
+        path = self.github_outbox / f"{action_id}.json"
+        path.write_text(json.dumps(outbox_entry, indent=2))
+        return {"status": "queued", "target": f"github:{channel}", "outbox_path": str(path)}
 
     def _respond_teams(self, channel: str, content: str, action: dict) -> dict:
-        """Send a Teams message. Requires teams-chat CLI."""
-        # TODO: Implement via teams_chat.py
-        return {"status": "pending", "target": f"teams:{channel}"}
+        """Write a Teams action to the outbox for the Teams agent to execute."""
+        action_id = f"teams-{int(time.time() * 1000)}"
+        outbox_entry = {
+            "id": action_id,
+            "action": "reply",
+            "chat_id": channel,
+            "body": content,
+            "created_at": time.time(),
+        }
+        path = self.teams_outbox / f"{action_id}.json"
+        path.write_text(json.dumps(outbox_entry, indent=2))
+        return {"status": "queued", "target": f"teams:{channel}", "outbox_path": str(path)}
 
     def _dispatch_to_manager(self, action: dict) -> dict:
         """Write task JSON to ccc-manager bridge directory.
@@ -97,9 +134,21 @@ class ActionDispatcher:
         return {"status": "dispatched", "task_id": task_id, "path": str(task_path)}
 
     def _alert(self, action: dict) -> dict:
-        """Send an alert (email, webhook, etc.)."""
-        # TODO: Implement via email-manager or webhook
-        return {"status": "pending", "target": "alert"}
+        """Write an alert to the email outbox."""
+        action_id = f"alert-{int(time.time() * 1000)}"
+        outbox_entry = {
+            "id": action_id,
+            "action": "email",
+            "subject": action.get("content", "Brain Alert")[:100],
+            "body": action.get("content", ""),
+            "source": action.get("source"),
+            "channel": action.get("channel"),
+            "event_id": action.get("event_id"),
+            "created_at": time.time(),
+        }
+        path = self.email_outbox / f"{action_id}.json"
+        path.write_text(json.dumps(outbox_entry, indent=2))
+        return {"status": "queued", "target": "email", "outbox_path": str(path)}
 
     def _log(self, action: dict) -> dict:
         """Store in memory only — no external action."""
