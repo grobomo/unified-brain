@@ -59,7 +59,7 @@ Webhook/API        ──→  Three-tier Memory           ──DISPATCH──�
 - [x] T014: Silent service deployment — runner.py with CLI, process guard, lock file, signal handling, log rotation
 - [x] T015: Health monitoring — heartbeat JSON, HTTP /healthz endpoint, circuit breaker (max_errors)
 - [x] T016: Multi-environment awareness and portability (local service, RONE k8s, AWS EC2)
-- [x] T017: Tests — 47 integration tests covering store, brain, dispatcher, registry, context, memory, outbox, env interpolation, E2E pipeline
+- [x] T017: Tests — 57 integration tests covering store, brain, dispatcher, registry, context, memory, outbox, env interpolation, transport factory, SQS mock, E2E pipeline
 
 ## Dependencies
 - github-agent at `_grobomo/github-agent/` — core/ modules to extract/reuse
@@ -92,7 +92,7 @@ Brain is the constant. Adapters, LLM backend, dispatchers are pluggable per envi
 - [x] T030: Self-contained GitHub adapter — use `gh` CLI directly, no github-agent dependency
 - [x] T031: Self-contained Teams adapter — inline MS Graph calls, token_path for local, client_credentials for containers
 - [x] T032: Pluggable LLM backend — subprocess (`claude -p`) OR HTTP API (Anthropic)
-- [ ] T033: Pluggable dispatcher — filesystem outbox OR SQS
+- [x] T033: Pluggable dispatcher — filesystem outbox OR SQS
 - [x] T034: Verify local deployment — 601 events (554 GitHub + 47 Teams), brain analyzing, health endpoint on :8790
 - [ ] T035: Deploy to RONE K8s — Docker image, push to registry, apply manifests, verify
 - [ ] T036: Deploy to AWS EC2 — spot instance, SQS dispatcher, CloudWatch logs, verify
@@ -103,8 +103,10 @@ PRs #1-16 merged. CI green. Brain service RUNNING LOCALLY (PID in data/brain.pid
 - GitHub adapter: self-contained via `gh` CLI, polling 8 repos, 554+ events ingested
 - Teams adapter: self-contained via stdlib urllib, token_path auth, watching 3 chats, 47+ events
 - Brain: pluggable LLM backend (subprocess/api), analyzing events, mostly LOG for routine CI
+- Dispatcher: pluggable transport — FileTransport (default) or SQSTransport (AWS), config-driven
 - 601+ events in unified store, 426+ processed by brain
+- 57 tests passing (10 new for transport factory + SQS mock)
 - Spec: specs/005-portable-deployment/SPEC.md
-- Next: T033 (SQS dispatcher), T035 (RONE K8s deploy), T036 (AWS EC2 deploy)
+- Next: T035 (RONE K8s deploy), T036 (AWS EC2 deploy)
 - Dependencies removed: no more github-agent, teams-agent, or msgraph-lib imports needed
-- The `requirements.txt` is empty — pure stdlib + `gh` CLI. Add `requests` if needed for robustness.
+- The `requirements.txt` is empty — pure stdlib + `gh` CLI. Add `boto3` for SQS transport.
