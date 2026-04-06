@@ -100,6 +100,9 @@ Brain is the constant. Adapters, LLM backend, dispatchers are pluggable per envi
 - [x] T039: Feedback loop — FeedbackStore (SQLite), records dispatch/respond outcomes, summary stats in brain prompt, 80 tests
 - [x] T040: Webhook adapter — HTTP server, POST /events + /events/raw + GET /events/stats, HMAC verification, 88 tests
 
+## Phase 11: Code Quality
+- [x] T041: Cleanup — move respond_results import to module level, remove duplicate variable in _relay_result
+
 ## Session Handoff
 PRs #1-24 merged. CI green. 40 tasks done (T001-T040), Phase 10 complete.
 - SERVICE IS LIVE locally: interval=3s, health on :8790, all adapters connected
