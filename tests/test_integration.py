@@ -169,8 +169,18 @@ class TestBrainAnalyzer(unittest.TestCase):
         context = {
             "project": {"name": "test-project", "worker_type": "k8s"},
             "memory": {
-                "project_summary": "Active project with frequent PRs",
-                "global_summary": "Pattern: login issues spike on Mondays",
+                "project_memory": {
+                    "summary": {
+                        "event_count": 42,
+                        "authors": ["dev1", "dev2"],
+                        "event_types": {"issue": 10, "pr": 32},
+                    }
+                },
+                "global_memory": {
+                    "total_events": 100,
+                    "active_projects": 3,
+                    "most_active": "test-project",
+                },
             },
             "same_channel": [
                 {"event_type": "pr", "author": "dev2", "title": "Refactor auth module"},
@@ -186,8 +196,11 @@ class TestBrainAnalyzer(unittest.TestCase):
         self.assertIn("## Project: test-project", prompt)
         self.assertIn("Worker type: k8s", prompt)
         self.assertIn("## Project Memory", prompt)
-        self.assertIn("Active project with frequent PRs", prompt)
+        self.assertIn("Events: 42", prompt)
+        self.assertIn("dev1", prompt)
         self.assertIn("## Global Patterns", prompt)
+        self.assertIn("Total events: 100", prompt)
+        self.assertIn("Most active: test-project", prompt)
         self.assertIn("## Recent in this channel", prompt)
         self.assertIn("## Related channels", prompt)
         self.assertIn("## This author's other activity", prompt)

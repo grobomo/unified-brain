@@ -82,6 +82,9 @@ Webhook/API        ──→  Three-tier Memory           ──DISPATCH──�
 - [x] T025: Improve brain LLM prompt — structured memory context, action guidelines, cross-channel awareness
 - [x] T026: Add README for public repo
 
+## Phase 8: Bug Fixes
+- [x] T027: Fix brain prompt memory keys — was referencing wrong keys, memory sections never rendered
+
 ## Session Handoff
 All phases complete. PRs #1-12 merged. Service verified working locally.
 - All source modules: store, brain, context, memory, dispatcher, service, registry, runner, adapters (github + teams)
