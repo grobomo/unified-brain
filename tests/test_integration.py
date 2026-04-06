@@ -22,6 +22,7 @@ from unified_brain.store import EventStore
 from unified_brain.brain import BrainAnalyzer, DISPATCH, LOG, RESPOND, ALERT
 from unified_brain.context import ContextBuilder
 from unified_brain.dispatcher import ActionDispatcher, FileTransport, SQSTransport, _create_transport
+from unified_brain.executor import ActionExecutor
 from unified_brain.memory import MemoryManager
 from unified_brain.registry import ProjectRegistry
 from unified_brain.service import BrainService
@@ -929,6 +930,124 @@ class TestDispatchTransportFactory(unittest.TestCase):
             self.assertTrue(dispatcher.bridge_dir.exists())
         finally:
             shutil.rmtree(tmpdir)
+
+
+class TestActionExecutor(unittest.TestCase):
+    """Tests for active RESPOND execution (T037)."""
+
+    def test_extract_number_from_issue_id(self):
+        self.assertEqual(ActionExecutor._extract_number("gh:issue:grobomo/repo:42"), "42")
+
+    def test_extract_number_from_pr_id(self):
+        self.assertEqual(ActionExecutor._extract_number("gh:pr:grobomo/repo:7"), "7")
+
+    def test_extract_number_from_event_id(self):
+        """Event IDs without issue number return empty."""
+        self.assertEqual(ActionExecutor._extract_number("gh:event:12345"), "")
+
+    def test_extract_number_empty(self):
+        self.assertEqual(ActionExecutor._extract_number(""), "")
+        self.assertEqual(ActionExecutor._extract_number("random"), "")
+
+    def test_respond_github_no_number(self):
+        """GitHub respond fails gracefully when event_id has no number."""
+        executor = ActionExecutor()
+        result = executor.respond_github("grobomo/repo", "gh:event:12345", "test comment")
+        self.assertEqual(result["status"], "error")
+        self.assertIn("Cannot extract", result["error"])
+
+    def test_respond_teams_no_token(self):
+        """Teams respond fails gracefully with no token configured."""
+        executor = ActionExecutor()
+        result = executor.respond_teams("chat-id", "test message")
+        self.assertEqual(result["status"], "error")
+        self.assertIn("No Teams token", result["error"])
+
+
+class TestActiveRespond(unittest.TestCase):
+    """Tests for active_respond integration in dispatcher (T037)."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir)
+
+    def test_active_respond_disabled_by_default(self):
+        """When active_respond is not set, RESPOND writes to outbox."""
+        dispatcher = ActionDispatcher({
+            "outbox_dir": os.path.join(self.tmpdir, "outbox"),
+            "results_dir": os.path.join(self.tmpdir, "inbox"),
+        })
+        self.assertFalse(dispatcher.active_respond)
+        action = {
+            "action": RESPOND, "source": "github",
+            "channel": "grobomo/repo", "content": "test",
+        }
+        result = dispatcher.dispatch(action)
+        self.assertEqual(result["status"], "queued")
+        # Outbox file should exist
+        files = list(dispatcher.github_outbox.glob("*.json"))
+        self.assertEqual(len(files), 1)
+
+    def test_active_respond_fallback_to_outbox(self):
+        """When active_respond=True but execution fails, falls back to outbox."""
+        dispatcher = ActionDispatcher({
+            "active_respond": True,
+            "outbox_dir": os.path.join(self.tmpdir, "outbox"),
+            "results_dir": os.path.join(self.tmpdir, "inbox"),
+        })
+        self.assertTrue(dispatcher.active_respond)
+        # This will fail (no gh CLI or bad event_id) and fall back to outbox
+        action = {
+            "action": RESPOND, "source": "github",
+            "channel": "grobomo/repo", "event_id": "gh:event:999",
+            "content": "test comment",
+        }
+        result = dispatcher.dispatch(action)
+        # Should fall back to outbox
+        self.assertEqual(result["status"], "queued")
+        files = list(dispatcher.github_outbox.glob("*.json"))
+        self.assertEqual(len(files), 1)
+
+    def test_active_respond_mock_success(self):
+        """When executor succeeds, returns executed status."""
+        dispatcher = ActionDispatcher({
+            "active_respond": True,
+            "outbox_dir": os.path.join(self.tmpdir, "outbox"),
+            "results_dir": os.path.join(self.tmpdir, "inbox"),
+        })
+
+        # Mock the executor
+        class MockExecutor:
+            def respond_github(self, repo, event_id, body):
+                return {"status": "executed", "url": "https://github.com/test/1#comment"}
+            def respond_teams(self, chat_id, body):
+                return {"status": "executed", "message_id": "mock-123"}
+
+        dispatcher._executor = MockExecutor()
+
+        # GitHub
+        result = dispatcher.dispatch({
+            "action": RESPOND, "source": "github",
+            "channel": "grobomo/repo", "event_id": "gh:issue:grobomo/repo:1",
+            "content": "test",
+        })
+        self.assertEqual(result["status"], "executed")
+
+        # Teams
+        result = dispatcher.dispatch({
+            "action": RESPOND, "source": "teams",
+            "channel": "19:abc@thread.v2",
+            "content": "test message",
+        })
+        self.assertEqual(result["status"], "executed")
+
+        # No outbox files should be written
+        gh_files = list(dispatcher.github_outbox.glob("*.json"))
+        teams_files = list(dispatcher.teams_outbox.glob("*.json"))
+        self.assertEqual(len(gh_files), 0)
+        self.assertEqual(len(teams_files), 0)
 
 
 if __name__ == "__main__":
