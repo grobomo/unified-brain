@@ -79,13 +79,17 @@ Webhook/API        ──→  Three-tier Memory           ──DISPATCH──�
 - [x] T024: Registry local overlay — projects.local.json for Teams chat IDs, deep-merged at load
 
 ## Session Handoff
-All phases complete. PRs #1-6 merged. Service verified working locally.
+All phases complete. PRs #1-9 merged. Service verified working locally.
 - All source modules: store, brain, context, memory, dispatcher, service, registry, runner, adapters (github + teams)
 - 41 integration tests passing
 - Live run: 331 GitHub events + 47 Teams messages ingested
-- Config overlay: brain.local.yaml for secrets (chat IDs), gitignored
+- Config overlay: brain.local.yaml + projects.local.json for secrets, gitignored
+- Registry overlay: Teams chat IDs merged from local file, cross-channel context works
 - ccc-manager bridge: config/unified-brain.yaml in ccc-manager, verified working
 - ccc-central archived — all functionality absorbed
+- Adapters: BoundedSet (10K cap) prevents memory leak, DRY parse_timestamp in base
+- Store: author index + filtered queries, no full table scans
 - Scripts: start.sh, stop.sh, status.sh, run.bat, install-service.ps1
 - schtasks needs admin elevation — use `bash scripts/start.sh` to run manually for now
 - Remaining: T016 (multi-env K8s/EC2 — future when deploying to infra)
+- Next opportunities: improve brain LLM prompt with memory context, add README for public repo
