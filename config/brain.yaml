@@ -12,8 +12,14 @@ brain:
   # model: claude-sonnet-4-20250514
 
 dispatcher:
+  transport: file
   outbox_dir: data/outbox
   results_dir: data/inbox
+  # For SQS transport (AWS EC2):
+  # transport: sqs
+  # sqs_task_queue_url: ${SQS_TASK_QUEUE_URL}
+  # sqs_result_queue_url: ${SQS_RESULT_QUEUE_URL}
+  # sqs_region: us-east-1
 
 memory:
   tier2_max_age_hours: 168

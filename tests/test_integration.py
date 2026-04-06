@@ -21,7 +21,7 @@ from unified_brain.runner import _deep_merge, _interpolate_env, _load_config
 from unified_brain.store import EventStore
 from unified_brain.brain import BrainAnalyzer, DISPATCH, LOG, RESPOND, ALERT
 from unified_brain.context import ContextBuilder
-from unified_brain.dispatcher import ActionDispatcher
+from unified_brain.dispatcher import ActionDispatcher, FileTransport, SQSTransport, _create_transport
 from unified_brain.memory import MemoryManager
 from unified_brain.registry import ProjectRegistry
 from unified_brain.service import BrainService
@@ -773,6 +773,161 @@ class TestEnvInterpolation(unittest.TestCase):
             self.assertEqual(config["name"], "test")
         finally:
             del os.environ["TEST_BRAIN_INTERVAL"]
+            shutil.rmtree(tmpdir)
+
+
+class TestDispatchTransportFactory(unittest.TestCase):
+    """Tests for pluggable dispatch transport (T033)."""
+
+    def test_default_is_file_transport(self):
+        transport = _create_transport({})
+        self.assertIsInstance(transport, FileTransport)
+
+    def test_explicit_file_transport(self):
+        transport = _create_transport({"transport": "file", "outbox_dir": "data/outbox"})
+        self.assertIsInstance(transport, FileTransport)
+
+    def test_sqs_transport_created(self):
+        transport = _create_transport({
+            "transport": "sqs",
+            "sqs_task_queue_url": "https://sqs.us-east-1.amazonaws.com/123/tasks",
+            "sqs_result_queue_url": "https://sqs.us-east-1.amazonaws.com/123/results",
+            "sqs_region": "us-west-2",
+        })
+        self.assertIsInstance(transport, SQSTransport)
+        self.assertEqual(transport.task_queue_url, "https://sqs.us-east-1.amazonaws.com/123/tasks")
+        self.assertEqual(transport.result_queue_url, "https://sqs.us-east-1.amazonaws.com/123/results")
+        self.assertEqual(transport.region, "us-west-2")
+
+    def test_file_transport_roundtrip(self):
+        tmpdir = tempfile.mkdtemp()
+        try:
+            transport = FileTransport(
+                bridge_dir=os.path.join(tmpdir, "bridge"),
+                results_dir=os.path.join(tmpdir, "results"),
+            )
+            task = {"id": "test-task-1", "summary": "Fix the bug", "text": "Fix the bug"}
+            result = transport.send_task(task)
+            self.assertEqual(result["status"], "dispatched")
+            self.assertEqual(result["task_id"], "test-task-1")
+
+            # Verify file written
+            files = list(transport.bridge_dir.glob("*.json"))
+            self.assertEqual(len(files), 1)
+            written = json.loads(files[0].read_text())
+            self.assertEqual(written["summary"], "Fix the bug")
+
+            # Simulate result
+            result_file = transport.results_dir / "test-task-1.json"
+            result_file.write_text(json.dumps({"id": "test-task-1", "success": True}))
+            results = transport.poll_results()
+            self.assertEqual(len(results), 1)
+            self.assertTrue(results[0]["success"])
+
+            # Result moved to done/
+            self.assertEqual(len(list(transport.results_dir.glob("*.json"))), 0)
+            self.assertEqual(len(list((transport.results_dir / "done").glob("*.json"))), 1)
+        finally:
+            shutil.rmtree(tmpdir)
+
+    def test_sqs_transport_send_with_mock(self):
+        """Test SQS transport with a mock boto3 client."""
+        transport = SQSTransport(
+            task_queue_url="https://sqs.us-east-1.amazonaws.com/123/tasks",
+            result_queue_url="https://sqs.us-east-1.amazonaws.com/123/results",
+        )
+
+        # Mock the client
+        class MockSQSClient:
+            def __init__(self):
+                self.sent = []
+                self.messages = []
+
+            def send_message(self, **kwargs):
+                self.sent.append(kwargs)
+                return {"MessageId": "mock-msg-001"}
+
+            def receive_message(self, **kwargs):
+                return {"Messages": self.messages}
+
+            def delete_message(self, **kwargs):
+                pass
+
+        mock_client = MockSQSClient()
+        transport._client = mock_client
+
+        # Send a task
+        task = {"id": "sqs-task-1", "summary": "Deploy fix", "source": "github:grobomo/repo"}
+        result = transport.send_task(task)
+        self.assertEqual(result["status"], "dispatched")
+        self.assertEqual(result["message_id"], "mock-msg-001")
+        self.assertEqual(len(mock_client.sent), 1)
+        self.assertEqual(mock_client.sent[0]["QueueUrl"], "https://sqs.us-east-1.amazonaws.com/123/tasks")
+
+        # Poll results (empty)
+        results = transport.poll_results()
+        self.assertEqual(results, [])
+
+        # Simulate a result message
+        mock_client.messages = [{
+            "Body": json.dumps({"id": "sqs-task-1", "success": True, "output": "Done"}),
+            "ReceiptHandle": "handle-1",
+        }]
+        results = transport.poll_results()
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["id"], "sqs-task-1")
+        self.assertTrue(results[0]["success"])
+
+    def test_sqs_transport_no_result_queue(self):
+        """SQS with no result queue returns empty results."""
+        transport = SQSTransport(task_queue_url="https://sqs.us-east-1.amazonaws.com/123/tasks")
+        results = transport.poll_results()
+        self.assertEqual(results, [])
+
+    def test_sqs_transport_send_error_handling(self):
+        """SQS send failure returns error status instead of raising."""
+        transport = SQSTransport(task_queue_url="https://sqs.us-east-1.amazonaws.com/123/tasks")
+
+        class FailClient:
+            def send_message(self, **kwargs):
+                raise RuntimeError("Connection refused")
+
+        transport._client = FailClient()
+        result = transport.send_task({"id": "fail-1", "summary": "test"})
+        self.assertEqual(result["status"], "error")
+        self.assertIn("Connection refused", result["error"])
+
+    def test_dispatcher_with_sqs_transport(self):
+        """ActionDispatcher uses SQS transport when configured."""
+        tmpdir = tempfile.mkdtemp()
+        try:
+            dispatcher = ActionDispatcher({
+                "transport": "sqs",
+                "sqs_task_queue_url": "https://sqs.us-east-1.amazonaws.com/123/tasks",
+                "outbox_dir": os.path.join(tmpdir, "outbox"),
+                "results_dir": os.path.join(tmpdir, "inbox"),
+            })
+            self.assertIsInstance(dispatcher.transport, SQSTransport)
+
+            # Channel outboxes still filesystem
+            self.assertTrue(dispatcher.github_outbox.exists())
+            self.assertTrue(dispatcher.teams_outbox.exists())
+            self.assertTrue(dispatcher.email_outbox.exists())
+        finally:
+            shutil.rmtree(tmpdir)
+
+    def test_dispatcher_default_file_transport(self):
+        """ActionDispatcher defaults to FileTransport."""
+        tmpdir = tempfile.mkdtemp()
+        try:
+            dispatcher = ActionDispatcher({
+                "outbox_dir": os.path.join(tmpdir, "outbox"),
+                "results_dir": os.path.join(tmpdir, "inbox"),
+            })
+            self.assertIsInstance(dispatcher.transport, FileTransport)
+            # bridge_dir exposed for backwards compat
+            self.assertTrue(dispatcher.bridge_dir.exists())
+        finally:
             shutil.rmtree(tmpdir)
 
 
