@@ -68,4 +68,9 @@ Webhook/API        ──→  Three-tier Memory           ──DISPATCH──�
 - msgraph-lib at `~/Documents/ProjectsCL1/msgraph-lib/` — shared MS Graph token management
 
 ## Session Handoff
-Spec complete. ccc-central absorbed. Start with T001-T006 (foundation), then T007-T010 (ccc-manager integration).
+Phase 1 (foundation) and Phase 2 (ccc-manager integration) complete.
+- All source modules built: store, brain, dispatcher, service, registry, adapters (github + teams)
+- 15 integration tests passing
+- Branch: 001-T001-project-foundation with 3 commits (initial TODO, Phase 1, Phase 2)
+- Next: Push branch, create PR, then Phase 3 (cross-channel intelligence) and write ccc-manager integration TODOs
+- ccc-central should be archived (TODO only, no code, fully absorbed)
