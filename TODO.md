@@ -24,8 +24,10 @@ Webhook/API        ──→  Three-tier Memory           ──DISPATCH──�
 ```
 
 ## What exists today
-- unified-brain — self-contained: EventStore (SQLite+FTS), brain.py (pluggable LLM), dispatcher.py (pluggable transport), context.py, memory.py, adapters (GitHub via gh CLI, Teams via MS Graph), 57 tests
+- unified-brain — self-contained: EventStore (SQLite+FTS), brain.py (pluggable LLM), dispatcher.py (pluggable transport), context.py, memory.py, feedback.py, metrics.py, executor.py, adapters (GitHub, Teams, Webhook), 88 tests
 - ccc-manager — task execution: BridgeInput/SQSInput, workers (local/K8s/EC2), fleet coordination, verification, Prometheus
+- Active respond: ActionExecutor posts GitHub comments + Teams messages directly via APIs
+- Observability: Prometheus /metrics endpoint, feedback loop tracks dispatch outcomes
 - Deployment: local (subprocess LLM, file dispatcher), K8s (API LLM, file dispatcher on PVC), EC2 (API LLM, SQS dispatcher)
 
 ## Integration with ccc-manager
@@ -102,6 +104,7 @@ Brain is the constant. Adapters, LLM backend, dispatchers are pluggable per envi
 
 ## Phase 11: Code Quality
 - [x] T041: Cleanup — move respond_results import to module level, remove duplicate variable in _relay_result
+- [x] T042: Update docs — README reflects 88 tests, webhook adapter, metrics, feedback, active respond; TODO "What exists" updated
 
 ## Session Handoff
 PRs #1-24 merged. CI green. 40 tasks done (T001-T040), Phase 10 complete.
