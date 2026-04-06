@@ -88,9 +88,9 @@ Webhook/API        ──→  Three-tier Memory           ──DISPATCH──�
 - [x] T029: CI test workflow — GitHub Actions runs pytest on push/PR to main
 
 ## Session Handoff
-All phases complete. PRs #1-12 merged. Service verified working locally.
-- All source modules: store, brain, context, memory, dispatcher, service, registry, runner, adapters (github + teams)
-- 48 integration tests passing
+All phases complete. PRs #1-15 merged. CI green (tests + secret scan).
+- All source modules: store, brain, context, memory, dispatcher, service, registry, runner, utils, adapters (github + teams)
+- 48 integration tests passing, CI runs on every push/PR
 - Live run: 331 GitHub events + 47 Teams messages ingested
 - Config overlay: brain.local.yaml + projects.local.json for secrets, gitignored
 - Registry overlay: Teams chat IDs merged from local file, cross-channel context works
@@ -100,7 +100,9 @@ All phases complete. PRs #1-12 merged. Service verified working locally.
 - Store: author index + filtered queries, no full table scans
 - Scripts: start.sh, stop.sh, status.sh, run.bat, install-service.ps1
 - Multi-env: Dockerfile, K8s manifests (deployment/service/configmap/pvc/kustomization), ${VAR} interpolation in config
-- Brain prompt: structured sections for project info, memory, channel activity, action guidelines
+- Brain prompt: structured memory context (project stats, global patterns), action guidelines, cross-channel awareness
 - README: architecture, quickstart, config docs, testing
+- Bug fixed: memory prompt was referencing wrong keys (T027), DRY deep_merge (T028)
+- CI: GitHub Actions — pytest + secret scan on push/PR
 - schtasks needs admin elevation — use `bash scripts/start.sh` to run manually for now
-- All tasks complete. Project is feature-complete for local use. Future: deploy to K8s/EC2, add more channel adapters (Slack, email), improve LLM prompts based on real usage patterns.
+- All tasks complete. Project is feature-complete. Future: deploy to K8s/EC2, add more channel adapters, tune LLM prompts from real usage.
