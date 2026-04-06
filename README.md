@@ -24,11 +24,15 @@ Webhook/API        ──→  Three-tier Memory           ──DISPATCH──�
 ## Features
 
 - **Single process, single DB** — one SQLite+FTS database for all channels
-- **Channel adapters** — thin adapters normalize events from each source (GitHub, Teams)
+- **Channel adapters** — thin adapters normalize events from each source (GitHub, Teams, Webhooks)
+- **Webhook ingestion** — HTTP endpoint accepts events via POST (`/events`, `/events/raw`), with HMAC-SHA256 signature verification
 - **Cross-channel context** — when analyzing a GitHub issue, the brain sees related Teams discussions
 - **Three-tier memory** — Tier 1: hot cache (24h events), Tier 2: per-project summaries, Tier 3: global patterns
+- **Feedback loop** — tracks dispatch/respond outcomes, feeds success/failure patterns back to the brain prompt
+- **Active respond** — posts GitHub comments and Teams messages directly via channel APIs, falls back to outbox
 - **Pluggable LLM backend** — subprocess (`claude -p`) for local, Anthropic HTTP API for containers/EC2
 - **Pluggable dispatch transport** — filesystem outbox (local/K8s) or SQS (EC2)
+- **Prometheus metrics** — `/metrics` endpoint with event ingestion rates, brain decisions, dispatch outcomes, cycle duration
 - **Rule-based fallback** — works without LLM when `claude` CLI is unavailable
 - **Outbox pattern** — actions written as JSON files to channel-specific directories
 - **ccc-manager integration** — dispatches tasks via bridge directory or SQS, polls for results
@@ -85,6 +89,10 @@ adapters:
       - owner/repo
   teams:
     enabled: false
+  webhook:
+    enabled: false
+    webhook_port: 8791
+    # webhook_secret: hmac-secret  # optional HMAC verification
 ```
 
 ## Project Registry
@@ -99,7 +107,7 @@ Secret fields (Teams chat IDs) go in `config/projects.local.json` (gitignored), 
 PYTHONPATH=src python -m pytest tests/ -v
 ```
 
-57 integration tests covering: store, brain, dispatcher, registry, context, memory, outbox, adapters, transport factory, SQS mock, config overlay, env interpolation.
+88 integration tests covering: store, brain, dispatcher, registry, context, memory, outbox, adapters, transport factory, SQS mock, config overlay, env interpolation, active respond, Prometheus metrics, feedback loop, webhook adapter.
 
 ## Dependencies
 
