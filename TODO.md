@@ -56,10 +56,10 @@ Webhook/API        ──→  Three-tier Memory           ──DISPATCH──�
 - [x] T013: Action relay protocol — outbox model (github/, teams/, email/, dispatch/) with JSON action files
 
 ## Phase 4: Deployment
-- [ ] T014: Silent service deployment — Cross-platform design, process guard (port from github-agent)
-- [ ] T015: Health monitoring — heartbeat, watchdog, log rotation, circuit breaker (port from github-agent)
+- [x] T014: Silent service deployment — runner.py with CLI, process guard, lock file, signal handling, log rotation
+- [x] T015: Health monitoring — heartbeat JSON, HTTP /healthz endpoint, circuit breaker (max_errors)
 - [ ] T016: Multi-environment awareness and portability (local service, RONE k8s, AWS EC2)
-- [ ] T017: Tests — adapter tests, brain integration tests, cross-channel context tests
+- [x] T017: Tests — 31 integration tests covering store, brain, dispatcher, registry, context, memory, outbox, E2E pipeline
 
 ## Dependencies
 - github-agent at `_grobomo/github-agent/` — core/ modules to extract/reuse
@@ -68,11 +68,11 @@ Webhook/API        ──→  Three-tier Memory           ──DISPATCH──�
 - msgraph-lib at `~/Documents/ProjectsCL1/msgraph-lib/` — shared MS Graph token management
 
 ## Session Handoff
-Phase 1-3 complete. PR #1 open. Branch: 001-T001-project-foundation.
-- All source modules: store, brain, context, memory, dispatcher, service, registry, adapters (github + teams)
-- 31 integration tests passing (15 Phase 1-2 + 16 Phase 3)
-- New modules: context.py (cross-channel context builder), memory.py (three-tier memory), outbox model in dispatcher
+Phase 1-4 mostly complete. PR #1 open. Branch: 001-T001-project-foundation.
+- All source modules: store, brain, context, memory, dispatcher, service, registry, runner, adapters (github + teams)
+- 31 integration tests passing
+- Runner: CLI entry point, process guard, heartbeat, health endpoint, circuit breaker, log rotation
 - PR: https://github.com/grobomo/unified-brain/pull/1
 - ccc-manager TODO.md updated with Phase 50 integration tasks (T181-T184)
 - ccc-central should be archived (absorbed into this project + ccc-manager)
-- Next: Phase 4 (deployment T014-T017), then merge PR #1
+- Remaining: T016 (multi-environment — K8s/EC2 configs), then merge PR #1
