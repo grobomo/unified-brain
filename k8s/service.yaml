@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: unified-brain
+  labels:
+    app: unified-brain
+spec:
+  selector:
+    app: unified-brain
+  ports:
+    - name: health
+      port: 8790
+      targetPort: health
+      protocol: TCP

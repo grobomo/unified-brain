@@ -1,0 +1,56 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: unified-brain-config
+data:
+  brain.yaml: |
+    interval: 300
+    db_path: data/brain.db
+    registry_path: config/projects.json
+
+    brain:
+      claude_path: claude
+      timeout: 60
+
+    dispatcher:
+      outbox_dir: data/outbox
+      results_dir: data/inbox
+
+    memory:
+      tier2_max_age_hours: 168
+      tier3_max_age_hours: 720
+
+    compact_every_n_cycles: 10
+
+    context:
+      context_hours: 48
+      max_related_events: 10
+      max_author_events: 5
+
+    adapters:
+      github:
+        enabled: true
+        token: ${GITHUB_TOKEN}
+        accounts:
+          - grobomo
+        repos:
+          - grobomo/unified-brain
+          - grobomo/github-agent
+          - grobomo/ccc-manager
+      teams:
+        enabled: ${TEAMS_ENABLED}
+        tenant_id: ${TEAMS_TENANT_ID}
+        client_id: ${TEAMS_CLIENT_ID}
+        client_secret: ${TEAMS_CLIENT_SECRET}
+
+  projects.json: |
+    {
+      "projects": {
+        "unified-brain": {
+          "repos": ["grobomo/unified-brain"],
+          "teams_chats": [],
+          "people": [],
+          "worker_type": "local"
+        }
+      }
+    }

@@ -10,6 +10,7 @@ import json
 import logging
 import logging.handlers
 import os
+import re
 import signal
 import sys
 import threading
@@ -225,11 +226,32 @@ def _deep_merge(base: dict, override: dict) -> dict:
     return result
 
 
+_ENV_RE = re.compile(r'\$\{([A-Za-z_][A-Za-z0-9_]*)\}')
+
+
+def _interpolate_env(obj):
+    """Replace ${VAR_NAME} patterns with environment variable values.
+
+    Supports strings, lists, and nested dicts. Unset vars are left as-is.
+    Works with K8s Secrets (envFrom), EC2 instance env, and local .env files.
+    """
+    if isinstance(obj, str):
+        def _replace(m):
+            return os.environ.get(m.group(1), m.group(0))
+        return _ENV_RE.sub(_replace, obj)
+    if isinstance(obj, dict):
+        return {k: _interpolate_env(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_interpolate_env(item) for item in obj]
+    return obj
+
+
 def _load_config(path: str) -> dict:
     """Load config from YAML/JSON, then deep-merge a .local overlay if present.
 
     e.g. config/brain.yaml + config/brain.local.yaml
     The .local file is gitignored and holds secrets like Teams chat IDs.
+    After merging, ${VAR_NAME} patterns are replaced with env var values.
     """
     p = Path(path)
     config = _load_yaml_or_json(p)
@@ -240,6 +262,9 @@ def _load_config(path: str) -> dict:
         local_config = _load_yaml_or_json(local_path)
         config = _deep_merge(config, local_config)
         logger.info(f"Merged local config from {local_path}")
+
+    # Interpolate environment variables
+    config = _interpolate_env(config)
 
     return config
 

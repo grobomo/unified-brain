@@ -17,7 +17,7 @@ import unittest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from unified_brain.adapters.base import BoundedSet, parse_timestamp
-from unified_brain.runner import _deep_merge, _load_config
+from unified_brain.runner import _deep_merge, _interpolate_env, _load_config
 from unified_brain.store import EventStore
 from unified_brain.brain import BrainAnalyzer, DISPATCH, LOG, RESPOND, ALERT
 from unified_brain.context import ContextBuilder
@@ -669,6 +669,59 @@ class TestConfigOverlay(unittest.TestCase):
             self.assertTrue(config["adapters"]["teams"]["enabled"])
             self.assertEqual(config["adapters"]["teams"]["chat_ids"], ["x"])
         finally:
+            shutil.rmtree(tmpdir)
+
+
+class TestEnvInterpolation(unittest.TestCase):
+    """Tests for env var interpolation in config (T016)."""
+
+    def test_interpolate_string(self):
+        os.environ["TEST_BRAIN_TOKEN"] = "ghp_abc123"
+        try:
+            result = _interpolate_env("token: ${TEST_BRAIN_TOKEN}")
+            self.assertEqual(result, "token: ghp_abc123")
+        finally:
+            del os.environ["TEST_BRAIN_TOKEN"]
+
+    def test_interpolate_nested_dict(self):
+        os.environ["TEST_BRAIN_HOST"] = "db.example.com"
+        try:
+            obj = {"db": {"host": "${TEST_BRAIN_HOST}", "port": 5432}}
+            result = _interpolate_env(obj)
+            self.assertEqual(result["db"]["host"], "db.example.com")
+            self.assertEqual(result["db"]["port"], 5432)
+        finally:
+            del os.environ["TEST_BRAIN_HOST"]
+
+    def test_interpolate_list(self):
+        os.environ["TEST_BRAIN_REPO"] = "grobomo/test"
+        try:
+            result = _interpolate_env(["${TEST_BRAIN_REPO}", "other"])
+            self.assertEqual(result, ["grobomo/test", "other"])
+        finally:
+            del os.environ["TEST_BRAIN_REPO"]
+
+    def test_unset_var_left_as_is(self):
+        result = _interpolate_env("${NONEXISTENT_VAR_12345}")
+        self.assertEqual(result, "${NONEXISTENT_VAR_12345}")
+
+    def test_non_string_passthrough(self):
+        self.assertEqual(_interpolate_env(42), 42)
+        self.assertIsNone(_interpolate_env(None))
+        self.assertTrue(_interpolate_env(True))
+
+    def test_load_config_interpolates(self):
+        os.environ["TEST_BRAIN_INTERVAL"] = "120"
+        tmpdir = tempfile.mkdtemp()
+        try:
+            config_path = os.path.join(tmpdir, "test.json")
+            with open(config_path, "w") as f:
+                json.dump({"interval": "${TEST_BRAIN_INTERVAL}", "name": "test"}, f)
+            config = _load_config(config_path)
+            self.assertEqual(config["interval"], "120")
+            self.assertEqual(config["name"], "test")
+        finally:
+            del os.environ["TEST_BRAIN_INTERVAL"]
             shutil.rmtree(tmpdir)
 
 
