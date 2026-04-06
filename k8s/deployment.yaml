@@ -1,0 +1,76 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: unified-brain
+  labels:
+    app: unified-brain
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: unified-brain
+  template:
+    metadata:
+      labels:
+        app: unified-brain
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      containers:
+        - name: unified-brain
+          image: unified-brain:latest
+          args: ["--config", "config/brain.yaml", "--health-port", "8790"]
+          ports:
+            - name: health
+              containerPort: 8790
+              protocol: TCP
+          envFrom:
+            - secretRef:
+                name: unified-brain-secrets
+                optional: true
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          volumeMounts:
+            - name: config
+              mountPath: /app/config/brain.yaml
+              subPath: brain.yaml
+              readOnly: true
+            - name: config
+              mountPath: /app/config/projects.json
+              subPath: projects.json
+              readOnly: true
+            - name: data
+              mountPath: /app/data
+      volumes:
+        - name: config
+          configMap:
+            name: unified-brain-config
+        - name: data
+          persistentVolumeClaim:
+            claimName: unified-brain-data

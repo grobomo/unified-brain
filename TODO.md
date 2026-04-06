@@ -58,8 +58,8 @@ Webhook/API        ──→  Three-tier Memory           ──DISPATCH──�
 ## Phase 4: Deployment
 - [x] T014: Silent service deployment — runner.py with CLI, process guard, lock file, signal handling, log rotation
 - [x] T015: Health monitoring — heartbeat JSON, HTTP /healthz endpoint, circuit breaker (max_errors)
-- [ ] T016: Multi-environment awareness and portability (local service, RONE k8s, AWS EC2)
-- [x] T017: Tests — 31 integration tests covering store, brain, dispatcher, registry, context, memory, outbox, E2E pipeline
+- [x] T016: Multi-environment awareness and portability (local service, RONE k8s, AWS EC2)
+- [x] T017: Tests — 47 integration tests covering store, brain, dispatcher, registry, context, memory, outbox, env interpolation, E2E pipeline
 
 ## Dependencies
 - github-agent at `_grobomo/github-agent/` — core/ modules to extract/reuse
@@ -79,9 +79,9 @@ Webhook/API        ──→  Three-tier Memory           ──DISPATCH──�
 - [x] T024: Registry local overlay — projects.local.json for Teams chat IDs, deep-merged at load
 
 ## Session Handoff
-All phases complete. PRs #1-9 merged. Service verified working locally.
+All phases complete. PRs #1-10 merged. Service verified working locally.
 - All source modules: store, brain, context, memory, dispatcher, service, registry, runner, adapters (github + teams)
-- 41 integration tests passing
+- 47 integration tests passing
 - Live run: 331 GitHub events + 47 Teams messages ingested
 - Config overlay: brain.local.yaml + projects.local.json for secrets, gitignored
 - Registry overlay: Teams chat IDs merged from local file, cross-channel context works
@@ -90,6 +90,6 @@ All phases complete. PRs #1-9 merged. Service verified working locally.
 - Adapters: BoundedSet (10K cap) prevents memory leak, DRY parse_timestamp in base
 - Store: author index + filtered queries, no full table scans
 - Scripts: start.sh, stop.sh, status.sh, run.bat, install-service.ps1
+- Multi-env: Dockerfile, K8s manifests (deployment/service/configmap/pvc/kustomization), ${VAR} interpolation in config
 - schtasks needs admin elevation — use `bash scripts/start.sh` to run manually for now
-- Remaining: T016 (multi-env K8s/EC2 — future when deploying to infra)
-- Next opportunities: improve brain LLM prompt with memory context, add README for public repo
+- All tasks complete. Next opportunities: improve brain LLM prompt with memory context, add README for public repo
