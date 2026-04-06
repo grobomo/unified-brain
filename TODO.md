@@ -97,7 +97,7 @@ Brain is the constant. Adapters, LLM backend, dispatchers are pluggable per envi
 ## Phase 10: Active Actions & Observability
 - [x] T037: Active RESPOND — ActionExecutor posts GitHub comments via `gh api`, Teams messages via Graph API, fallback to outbox
 - [x] T038: Prometheus metrics — lightweight stdlib module, counters+gauges with labels, /metrics endpoint, 10 metric series, 74 tests
-- [ ] T039: Feedback loop — track dispatch outcomes, use success/failure signals to improve brain prompt context
+- [x] T039: Feedback loop — FeedbackStore (SQLite), records dispatch/respond outcomes, summary stats in brain prompt, 80 tests
 - [ ] T040: Webhook adapter — HTTP endpoint that accepts events (for integrations beyond polling)
 
 ## Session Handoff
@@ -107,4 +107,5 @@ PRs #1-22 merged. CI green. 38 tasks done (T001-T038), Phase 10 in progress.
 - 601+ events in store, 74 tests passing, zero external deps for core
 - Prometheus metrics: /metrics endpoint, 10 metric series (ingestion, decisions, dispatch, respond, cycles, errors)
 - Deployment artifacts: Dockerfile, K8s manifests (kustomize), CloudFormation (EC2 spot + SQS)
-- Next: T039 (feedback loop), T040 (webhook adapter)
+- Feedback loop: FeedbackStore tracks outcomes, brain prompt shows success/failure patterns
+- Next: T040 (webhook adapter)

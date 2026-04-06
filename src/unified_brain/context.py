@@ -16,10 +16,12 @@ log = logging.getLogger(__name__)
 class ContextBuilder:
     """Builds cross-channel context for brain analysis."""
 
-    def __init__(self, store: EventStore, registry: ProjectRegistry, config: dict = None, memory=None):
+    def __init__(self, store: EventStore, registry: ProjectRegistry, config: dict = None,
+                 memory=None, feedback=None):
         self.store = store
         self.registry = registry
         self.memory = memory
+        self.feedback = feedback
         self.config = config or {}
         self.context_hours = self.config.get("context_hours", 48)
         self.max_related = self.config.get("max_related_events", 10)
@@ -45,7 +47,12 @@ class ContextBuilder:
             "author_activity": [],
             "project": None,
             "memory": None,
+            "feedback": None,
         }
+
+        # Include feedback stats if available
+        if self.feedback:
+            context["feedback"] = self.feedback.summary(hours=self.context_hours)
 
         # Find project via registry
         project = self.registry.find_by_channel(source, channel)

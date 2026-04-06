@@ -215,6 +215,27 @@ class BrainAnalyzer:
                 for e in author[:3]:
                     parts.append(f"- [{e.get('source')}] {e.get('title', '')[:100]}")
 
+            # Feedback from previous actions
+            feedback = context.get("feedback")
+            if feedback:
+                has_stats = any(k != "recent_failures" and isinstance(feedback.get(k), dict)
+                                for k in feedback)
+                if has_stats:
+                    parts.append("")
+                    parts.append("## Recent Outcomes (feedback loop)")
+                    for action_name, action_stats in feedback.items():
+                        if action_name == "recent_failures" or not isinstance(action_stats, dict):
+                            continue
+                        parts.append(
+                            f"- {action_name.upper()}: {action_stats.get('success', 0)}/{action_stats.get('total', 0)} "
+                            f"succeeded ({action_stats.get('rate', 0):.0%})"
+                        )
+                failures = feedback.get("recent_failures", [])
+                if failures:
+                    parts.append("Recent failures:")
+                    for f in failures[:3]:
+                        parts.append(f"  - {f.get('action')} on {f.get('source')}:{f.get('channel')}: {f.get('error', '?')}")
+
         parts.extend([
             "",
             "## Response Format",

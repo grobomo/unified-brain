@@ -12,6 +12,7 @@ from .store import EventStore
 from .brain import BrainAnalyzer, RESPOND
 from .context import ContextBuilder
 from .dispatcher import ActionDispatcher
+from .feedback import FeedbackStore
 from .memory import MemoryManager
 from .metrics import (
     events_ingested, events_processed, brain_decisions,
@@ -33,9 +34,10 @@ class BrainService:
         self.dispatcher = ActionDispatcher(self.config.get("dispatcher", {}))
         self.registry = ProjectRegistry(self.config.get("registry_path", "config/projects.yaml"))
         self.memory = MemoryManager(self.store.conn, self.config.get("memory", {}))
+        self.feedback = FeedbackStore(self.store.conn)
         self.context_builder = ContextBuilder(
             self.store, self.registry, self.config.get("context", {}),
-            memory=self.memory,
+            memory=self.memory, feedback=self.feedback,
         )
         self.adapters = []
         self.interval = self.config.get("interval", 60)
@@ -82,9 +84,26 @@ class BrainService:
                 if action.get("action") == "dispatch":
                     outcome = "success" if status == "dispatched" else "failure"
                     dispatch_results.inc(outcome=outcome)
-                elif action.get("action") == "respond" and status == "executed":
-                    from .metrics import respond_results
-                    respond_results.inc(outcome="success", source=event.get("source", ""))
+                elif action.get("action") == "respond":
+                    if status == "executed":
+                        from .metrics import respond_results
+                        respond_results.inc(outcome="success", source=event.get("source", ""))
+                        self.feedback.record(
+                            task_id=event.get("id", ""),
+                            action="respond",
+                            success=True,
+                            source=event.get("source", ""),
+                            channel=event.get("channel", ""),
+                        )
+                    elif status in ("queued", "error"):
+                        self.feedback.record(
+                            task_id=event.get("id", ""),
+                            action="respond",
+                            success=status == "queued",
+                            source=event.get("source", ""),
+                            channel=event.get("channel", ""),
+                            error=result.get("error", "") if status == "error" else "",
+                        )
 
                 log.info(f"[brain] {event['id']} -> {action.get('action')}")
             except Exception as e:
@@ -130,6 +149,17 @@ class BrainService:
         ctx = result.get("channel_context", {})
         source = ctx.get("source")
         channel = ctx.get("channel")
+
+        # Record feedback
+        success = result.get("success", False)
+        self.feedback.record(
+            task_id=result.get("id", ""),
+            action="dispatch",
+            success=success,
+            source=source or "",
+            channel=channel or "",
+            error=result.get("error", "") if not success else "",
+        )
 
         if not source or not channel:
             log.debug(f"[relay] No channel_context in result {result.get('id')}, skipping relay")
