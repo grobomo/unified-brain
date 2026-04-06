@@ -81,14 +81,22 @@ class BrainAnalyzer:
             # Memory (project summary + global patterns)
             memory = context.get("memory")
             if memory:
-                if memory.get("project_summary"):
-                    parts.append("")
-                    parts.append("## Project Memory")
-                    parts.append(memory["project_summary"][:1000])
-                if memory.get("global_summary"):
+                project_mem = memory.get("project_memory", {})
+                if project_mem:
+                    summary = project_mem.get("summary", {})
+                    if summary:
+                        parts.append("")
+                        parts.append("## Project Memory")
+                        parts.append(f"Events: {summary.get('event_count', 0)}, "
+                                     f"Authors: {', '.join(summary.get('authors', []))}, "
+                                     f"Types: {summary.get('event_types', {})}")
+                global_mem = memory.get("global_memory")
+                if global_mem:
                     parts.append("")
                     parts.append("## Global Patterns")
-                    parts.append(memory["global_summary"][:500])
+                    parts.append(f"Total events: {global_mem.get('total_events', 0)}, "
+                                 f"Active projects: {global_mem.get('active_projects', 0)}, "
+                                 f"Most active: {global_mem.get('most_active', 'unknown')}")
 
             # Same-channel recent activity
             same = context.get("same_channel", [])
