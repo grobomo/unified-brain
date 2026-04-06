@@ -98,10 +98,13 @@ Brain is the constant. Adapters, LLM backend, dispatchers are pluggable per envi
 - [ ] T036: Deploy to AWS EC2 — spot instance, SQS dispatcher, CloudWatch logs, verify
 
 ## Session Handoff
-PRs #1-15 merged. CI green. Phases 1-8 complete (foundation through hardening).
-Phase 9 in progress — making the brain ACTUALLY FUNCTIONAL by removing all local filesystem deps.
-- Current adapters are broken: they import from github-agent and teams-agent via hardcoded local paths
-- Brain calls `claude -p` subprocess — won't work in containers
-- Dispatcher writes to local filesystem — no SQS option
+PRs #1-16 merged. CI green. Brain service RUNNING LOCALLY (PID in data/brain.pid).
+- SERVICE IS LIVE: interval=3s, health on :8790, both adapters connected
+- GitHub adapter: self-contained via `gh` CLI, polling 8 repos, 554+ events ingested
+- Teams adapter: self-contained via stdlib urllib, token_path auth, watching 3 chats, 47+ events
+- Brain: pluggable LLM backend (subprocess/api), analyzing events, mostly LOG for routine CI
+- 601+ events in unified store, 426+ processed by brain
 - Spec: specs/005-portable-deployment/SPEC.md
-- Next task: T030 — self-contained GitHub adapter using `gh` CLI directly
+- Next: T033 (SQS dispatcher), T035 (RONE K8s deploy), T036 (AWS EC2 deploy)
+- Dependencies removed: no more github-agent, teams-agent, or msgraph-lib imports needed
+- The `requirements.txt` is empty — pure stdlib + `gh` CLI. Add `requests` if needed for robustness.
