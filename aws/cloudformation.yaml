@@ -1,0 +1,257 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "Unified Brain — EC2 spot instance with SQS dispatcher"
+
+Parameters:
+  InstanceType:
+    Type: String
+    Default: t3.small
+    AllowedValues: [t3.micro, t3.small, t3.medium]
+  KeyName:
+    Type: String
+    Default: ""
+    Description: "EC2 key pair name (optional, for SSH access)"
+  AnthropicApiKey:
+    Type: String
+    NoEcho: true
+    Description: "Anthropic API key for brain LLM backend"
+  GitHubToken:
+    Type: String
+    NoEcho: true
+    Description: "GitHub token for gh CLI"
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: "VPC to deploy into"
+  SubnetId:
+    Type: AWS::EC2::Subnet::Id
+    Description: "Subnet for the EC2 instance"
+
+Resources:
+  # SQS queues for dispatch transport
+  TaskQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: unified-brain-tasks
+      VisibilityTimeout: 300
+      MessageRetentionPeriod: 86400
+      Tags:
+        - Key: app
+          Value: unified-brain
+
+  ResultQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: unified-brain-results
+      VisibilityTimeout: 60
+      MessageRetentionPeriod: 86400
+      Tags:
+        - Key: app
+          Value: unified-brain
+
+  # CloudWatch log group
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /unified-brain
+      RetentionInDays: 14
+
+  # IAM role for EC2
+  InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: unified-brain-ec2
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
+      Policies:
+        - PolicyName: unified-brain-sqs
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sqs:SendMessage
+                  - sqs:ReceiveMessage
+                  - sqs:DeleteMessage
+                  - sqs:GetQueueAttributes
+                Resource:
+                  - !GetAtt TaskQueue.Arn
+                  - !GetAtt ResultQueue.Arn
+        - PolicyName: unified-brain-logs
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !GetAtt LogGroup.Arn
+
+  InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref InstanceRole
+
+  # Security group — outbound HTTPS only
+  SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: "Unified Brain — HTTPS egress only"
+      VpcId: !Ref VpcId
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: "HTTPS (GitHub, Anthropic, Graph API, SQS)"
+        - IpProtocol: udp
+          FromPort: 53
+          ToPort: 53
+          CidrIp: 0.0.0.0/0
+          Description: "DNS"
+        - IpProtocol: tcp
+          FromPort: 53
+          ToPort: 53
+          CidrIp: 0.0.0.0/0
+          Description: "DNS over TCP"
+      Tags:
+        - Key: app
+          Value: unified-brain
+
+  # EC2 spot instance
+  SpotInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: !Ref InstanceType
+      ImageId: !Sub "{{resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64}}"
+      SubnetId: !Ref SubnetId
+      SecurityGroupIds:
+        - !Ref SecurityGroup
+      IamInstanceProfile: !Ref InstanceProfile
+      InstanceMarketOptions:
+        MarketType: spot
+        SpotOptions:
+          SpotInstanceType: persistent
+          InstanceInterruptionBehavior: stop
+      Tags:
+        - Key: Name
+          Value: unified-brain
+        - Key: app
+          Value: unified-brain
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          set -euo pipefail
+
+          # Install deps
+          yum install -y python3.12 python3.12-pip git
+          pip3.12 install boto3
+
+          # Install gh CLI
+          yum install -y 'dnf-command(config-manager)'
+          yum-config-manager --add-repo https://cli.github.com/packages/rpm/gh-cli.repo
+          yum install -y gh
+
+          # Create app user
+          useradd -r -m brain
+          mkdir -p /opt/unified-brain/data /opt/unified-brain/config
+
+          # Clone and set up
+          cd /opt/unified-brain
+          GH_TOKEN="${GitHubToken}" gh repo clone grobomo/unified-brain -- --depth 1
+          cp -r unified-brain/src unified-brain/config .
+          chown -R brain:brain /opt/unified-brain
+
+          # Write config with SQS transport
+          cat > /opt/unified-brain/config/brain.yaml << 'BRAINEOF'
+          interval: 60
+          db_path: data/brain.db
+          registry_path: config/projects.json
+
+          brain:
+            llm_backend: api
+            api_key: ${AnthropicApiKey}
+            model: claude-sonnet-4-20250514
+            timeout: 60
+
+          dispatcher:
+            transport: sqs
+            sqs_task_queue_url: ${TaskQueue}
+            sqs_result_queue_url: ${ResultQueue}
+            sqs_region: ${AWS::Region}
+            outbox_dir: data/outbox
+            results_dir: data/inbox
+
+          memory:
+            tier2_max_age_hours: 168
+            tier3_max_age_hours: 720
+
+          compact_every_n_cycles: 10
+
+          context:
+            context_hours: 48
+            max_related_events: 10
+            max_author_events: 5
+
+          adapters:
+            github:
+              enabled: true
+              repos:
+                - grobomo/unified-brain
+                - grobomo/ccc-manager
+                - grobomo/claude-portable
+                - grobomo/hackathon26
+            teams:
+              enabled: false
+          BRAINEOF
+
+          # Set environment
+          echo "export GH_TOKEN='${GitHubToken}'" > /opt/unified-brain/.env
+          echo "export ANTHROPIC_API_KEY='${AnthropicApiKey}'" >> /opt/unified-brain/.env
+          echo "export PYTHONPATH=/opt/unified-brain/src" >> /opt/unified-brain/.env
+          chmod 600 /opt/unified-brain/.env
+          chown brain:brain /opt/unified-brain/.env
+
+          # Create systemd service
+          cat > /etc/systemd/system/unified-brain.service << 'SVCEOF'
+          [Unit]
+          Description=Unified Brain Service
+          After=network-online.target
+          Wants=network-online.target
+
+          [Service]
+          Type=simple
+          User=brain
+          WorkingDirectory=/opt/unified-brain
+          EnvironmentFile=/opt/unified-brain/.env
+          ExecStart=/usr/bin/python3.12 -m unified_brain --config config/brain.yaml --health-port 8790
+          Restart=always
+          RestartSec=10
+
+          [Install]
+          WantedBy=multi-user.target
+          SVCEOF
+
+          systemctl daemon-reload
+          systemctl enable unified-brain
+          systemctl start unified-brain
+
+Outputs:
+  TaskQueueUrl:
+    Value: !Ref TaskQueue
+    Description: "SQS task queue URL"
+  ResultQueueUrl:
+    Value: !Ref ResultQueue
+    Description: "SQS result queue URL"
+  InstanceId:
+    Value: !Ref SpotInstance
+    Description: "EC2 instance ID"
+  LogGroupName:
+    Value: !Ref LogGroup
+    Description: "CloudWatch log group"
