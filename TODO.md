@@ -69,12 +69,15 @@ Webhook/API        ──→  Three-tier Memory           ──DISPATCH──�
 
 ## Phase 5: Operational Polish
 - [x] T018: Scheduled service — scripts/start.sh, stop.sh, status.sh, run.bat, install-service.ps1 (needs admin for schtasks)
-- [ ] T019: Enable Teams adapter — configure chat_ids, test with live Teams data
+- [x] T019: Enable Teams adapter — config overlay for secrets, 47 msgs ingested from 3 chats
 - [x] T020: Connect to ccc-manager bridge — config created, bridge verified (ccc-manager/config/unified-brain.yaml)
 - [x] T021: Archive ccc-central — marked as absorbed, TODO.md updated with redirect
 
+## Phase 6: Hardening
+- [ ] T022: Optimize store queries — add author filter to recent(), add author index, avoid full scans in context builder
+
 ## Session Handoff
-All phases complete. PRs #1-5 merged. Service verified working locally.
+All phases complete. PRs #1-6 merged. Service verified working locally.
 - All source modules: store, brain, context, memory, dispatcher, service, registry, runner, adapters (github + teams)
 - 35 integration tests passing
 - Live run: 331 GitHub events + 47 Teams messages ingested
