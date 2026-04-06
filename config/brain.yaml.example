@@ -1,0 +1,45 @@
+# Unified Brain — example configuration
+# Copy to brain.yaml and customize.
+
+# Poll interval in seconds
+interval: 60
+
+# Database path
+db_path: data/brain.db
+
+# Brain analyzer settings
+brain:
+  claude_path: claude
+  timeout: 60
+
+# Dispatcher settings
+dispatcher:
+  outbox_dir: data/outbox
+  results_dir: data/inbox
+
+# Memory settings
+memory:
+  tier2_max_age_hours: 168   # 7 days
+  tier3_max_age_hours: 720   # 30 days
+
+# Compaction: run every N cycles
+compact_every_n_cycles: 10
+
+# Context builder settings
+context:
+  context_hours: 48
+  max_related_events: 10
+  max_author_events: 5
+
+# Project registry
+registry_path: config/projects.yaml
+
+# Channel adapters
+adapters:
+  github:
+    enabled: false
+    account: grobomo
+    # repos: []  # empty = discover all
+  teams:
+    enabled: false
+    # chat_ids: []  # empty = discover via registry
