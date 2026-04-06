@@ -24,11 +24,9 @@ Webhook/API        ──→  Three-tier Memory           ──DISPATCH──�
 ```
 
 ## What exists today
-- github-agent/core/ — EventStore (SQLite+FTS), brain.py, dispatcher.py, context.py, memory.py, compactor.py
-- teams-agent/ — ImportanceClassifier, MessageStore, pipeline, notifier
-- ccc-manager — full dispatch pipeline: monitors, inputs, dispatchers (SHTD + Claude AI + SQS), workers (local/K8s/EC2), fleet coordination, verification, Prometheus, worktree isolation
-- ccc-central — TODO.md only, absorbed into this project + ccc-manager
-- Both github-agent and teams-agent are completely separate: different schemas, different brains, different DBs
+- unified-brain — self-contained: EventStore (SQLite+FTS), brain.py (pluggable LLM), dispatcher.py (pluggable transport), context.py, memory.py, adapters (GitHub via gh CLI, Teams via MS Graph), 57 tests
+- ccc-manager — task execution: BridgeInput/SQSInput, workers (local/K8s/EC2), fleet coordination, verification, Prometheus
+- Deployment: local (subprocess LLM, file dispatcher), K8s (API LLM, file dispatcher on PVC), EC2 (API LLM, SQS dispatcher)
 
 ## Integration with ccc-manager
 - **Brain → Manager**: Write task JSON to bridge directory or SQS queue. ccc-manager's BridgeInput/SQSInput picks it up.
@@ -62,10 +60,9 @@ Webhook/API        ──→  Three-tier Memory           ──DISPATCH──�
 - [x] T017: Tests — 57 integration tests covering store, brain, dispatcher, registry, context, memory, outbox, env interpolation, transport factory, SQS mock, E2E pipeline
 
 ## Dependencies
-- github-agent at `_grobomo/github-agent/` — core/ modules to extract/reuse
-- teams-agent at `_tmemu/teams-agent/` — poller + classifier to wrap as adapter
-- ccc-manager at `_grobomo/ccc-manager/` — task dispatch and worker execution
-- msgraph-lib at `~/Documents/ProjectsCL1/msgraph-lib/` — shared MS Graph token management
+- ccc-manager at `_grobomo/ccc-manager/` — task dispatch and worker execution (receives DISPATCH actions)
+- `gh` CLI — GitHub adapter (pre-installed on all target environments)
+- `boto3` — SQS transport only (EC2 deploy), not required for local/K8s
 
 ## Phase 5: Operational Polish
 - [x] T018: Scheduled service — scripts/start.sh, stop.sh, status.sh, run.bat, install-service.ps1 (needs admin for schtasks)

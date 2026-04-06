@@ -8,7 +8,7 @@ Multi-channel brain service. Ingests events from GitHub, Teams, and future sourc
 Communication Channels         unified-brain (THINKER)              ccc-manager (DOER)
 ─────────────────────         ─────────────────────                ──────────────────
 GitHub events      ──→  EventStore (SQLite+FTS)                   Workers:
-Teams messages     ──→  Brain Analyzer (claude -p)                 - Local (claude -p)
+Teams messages     ──→  Brain Analyzer (pluggable LLM)             - Local (claude -p)
 Webhook/API        ──→  Three-tier Memory           ──DISPATCH──→  - K8s (kubectl exec)
                         Cross-channel Context                      - EC2 (SSH/SSM)
                         Project Registry                           Fleet coordination
@@ -27,10 +27,12 @@ Webhook/API        ──→  Three-tier Memory           ──DISPATCH──�
 - **Channel adapters** — thin adapters normalize events from each source (GitHub, Teams)
 - **Cross-channel context** — when analyzing a GitHub issue, the brain sees related Teams discussions
 - **Three-tier memory** — Tier 1: hot cache (24h events), Tier 2: per-project summaries, Tier 3: global patterns
+- **Pluggable LLM backend** — subprocess (`claude -p`) for local, Anthropic HTTP API for containers/EC2
+- **Pluggable dispatch transport** — filesystem outbox (local/K8s) or SQS (EC2)
 - **Rule-based fallback** — works without LLM when `claude` CLI is unavailable
 - **Outbox pattern** — actions written as JSON files to channel-specific directories
-- **ccc-manager integration** — dispatches tasks via bridge directory, polls for results
-- **Environment portability** — runs locally, in K8s, or on EC2 via env var interpolation
+- **ccc-manager integration** — dispatches tasks via bridge directory or SQS, polls for results
+- **Environment portability** — runs locally, in K8s, or on EC2 with config-driven plugins
 
 ## Quick Start
 
@@ -48,8 +50,14 @@ PYTHONPATH=src python -m unified_brain --health-port 8790
 docker build -t unified-brain .
 docker run -v $(pwd)/data:/app/data unified-brain
 
-# Kubernetes
+# Kubernetes (RONE)
 kubectl apply -k k8s/
+kubectl create secret generic unified-brain-secrets \
+  --from-literal=GITHUB_TOKEN=ghp_... \
+  --from-literal=ANTHROPIC_API_KEY=sk-ant-...
+
+# AWS EC2 (spot instance + SQS)
+./scripts/deploy-ec2.sh --vpc-id vpc-xxx --subnet-id subnet-xxx
 ```
 
 ## Configuration
@@ -63,10 +71,16 @@ Environment variables can be injected via `${VAR_NAME}` syntax in any config val
 interval: 300
 db_path: data/brain.db
 
+brain:
+  llm_backend: subprocess  # or: api (uses ANTHROPIC_API_KEY)
+
+dispatcher:
+  transport: file          # or: sqs (uses SQS_TASK_QUEUE_URL)
+  outbox_dir: data/outbox
+
 adapters:
   github:
     enabled: true
-    token: ${GITHUB_TOKEN}
     repos:
       - owner/repo
   teams:
@@ -85,10 +99,12 @@ Secret fields (Teams chat IDs) go in `config/projects.local.json` (gitignored), 
 PYTHONPATH=src python -m pytest tests/ -v
 ```
 
-48 integration tests covering: store, brain, dispatcher, registry, context, memory, outbox, adapters, config overlay, env interpolation.
+57 integration tests covering: store, brain, dispatcher, registry, context, memory, outbox, adapters, transport factory, SQS mock, config overlay, env interpolation.
 
 ## Dependencies
 
 Zero external dependencies for core functionality. Python 3.12+ stdlib only.
 
-Optional: `pyyaml` for YAML config files (falls back to JSON without it).
+- `gh` CLI — required for GitHub adapter
+- `pyyaml` — optional, for YAML config files (falls back to JSON)
+- `boto3` — optional, for SQS dispatch transport (EC2 deployments only)
