@@ -3033,5 +3033,192 @@ class TestAdapterSelfMessageFiltering(unittest.TestCase):
         self.assertEqual(len(events), 1)
 
 
+class TestHookRunnerAdapter(unittest.TestCase):
+    """Tests for HookRunnerAdapter — JSONL file poller (T053)."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_file_poller_reads_new_lines(self):
+        """FilePoller reads only lines appended after initialization."""
+        from unified_brain.adapters.hook_runner import _FilePoller
+
+        path = os.path.join(self.tmpdir, "test.jsonl")
+        # Create file with existing content
+        with open(path, "w") as f:
+            f.write('{"old": true}\n')
+
+        poller = _FilePoller(path)
+        # First poll: initializes offset, returns nothing (skips existing)
+        lines = poller.read_new_lines()
+        self.assertEqual(lines, [])
+
+        # Append new content
+        with open(path, "a") as f:
+            f.write('{"new": 1}\n')
+            f.write('{"new": 2}\n')
+
+        lines = poller.read_new_lines()
+        self.assertEqual(len(lines), 2)
+        self.assertIn('"new": 1', lines[0])
+
+    def test_file_poller_handles_missing_file(self):
+        """FilePoller gracefully handles missing files."""
+        from unified_brain.adapters.hook_runner import _FilePoller
+
+        poller = _FilePoller(os.path.join(self.tmpdir, "nonexistent.jsonl"))
+        lines = poller.read_new_lines()
+        self.assertEqual(lines, [])
+
+    def test_file_poller_handles_rotation(self):
+        """FilePoller resets offset when file is truncated/rotated."""
+        from unified_brain.adapters.hook_runner import _FilePoller
+
+        path = os.path.join(self.tmpdir, "rotate.jsonl")
+        with open(path, "w") as f:
+            f.write('{"line": 1}\n' * 100)
+
+        poller = _FilePoller(path)
+        poller.read_new_lines()  # Initialize
+
+        # Truncate (simulates log rotation)
+        with open(path, "w") as f:
+            f.write('{"rotated": true}\n')
+
+        lines = poller.read_new_lines()
+        self.assertEqual(len(lines), 1)
+        self.assertIn("rotated", lines[0])
+
+    def test_normalize_hook_log_gate_block(self):
+        """Hook log gate block normalizes correctly."""
+        from unified_brain.adapters.hook_runner import _normalize_hook_log
+
+        line = json.dumps({
+            "ts": "2026-04-06T20:00:00Z",
+            "event": "PreToolUse",
+            "module": "spec-gate.js",
+            "result": "block",
+            "elapsed_ms": 12,
+            "reason": "No unchecked tasks",
+        })
+        event = _normalize_hook_log(line)
+        self.assertIsNotNone(event)
+        self.assertEqual(event["source"], "hook-runner")
+        self.assertEqual(event["channel"], "hook-log")
+        self.assertEqual(event["event_type"], "gate_block")
+        self.assertEqual(event["author"], "spec-gate.js")
+        self.assertIn("block", event["title"])
+        self.assertEqual(event["metadata"]["reason"], "No unchecked tasks")
+
+    def test_normalize_hook_log_gate_allow(self):
+        """Hook log gate allow normalizes correctly."""
+        from unified_brain.adapters.hook_runner import _normalize_hook_log
+
+        line = json.dumps({
+            "event": "PreToolUse",
+            "module": "branch-gate.js",
+            "result": "allow",
+        })
+        event = _normalize_hook_log(line)
+        self.assertEqual(event["event_type"], "gate_allow")
+
+    def test_normalize_hook_log_invalid_json(self):
+        """Invalid JSON returns None."""
+        from unified_brain.adapters.hook_runner import _normalize_hook_log
+
+        self.assertIsNone(_normalize_hook_log("not json"))
+        self.assertIsNone(_normalize_hook_log("{broken"))
+
+    def test_normalize_reflection(self):
+        """Reflection JSONL normalizes correctly."""
+        from unified_brain.adapters.hook_runner import _normalize_reflection
+
+        line = json.dumps({
+            "ts": "2026-04-06T20:00:00Z",
+            "verdict": "needs_improvement",
+            "issues": ["spec-gate blocked 3 times", "branch naming inconsistent"],
+            "todos": ["Fix spec-gate regex"],
+        })
+        event = _normalize_reflection(line)
+        self.assertIsNotNone(event)
+        self.assertEqual(event["source"], "hook-runner")
+        self.assertEqual(event["channel"], "self-reflection")
+        self.assertEqual(event["event_type"], "reflection_result")
+        self.assertIn("needs_improvement", event["title"])
+        self.assertIn("2 issues", event["title"])
+        self.assertEqual(event["metadata"]["issue_count"], 2)
+
+    def test_normalize_reflection_invalid_json(self):
+        """Invalid JSON returns None."""
+        from unified_brain.adapters.hook_runner import _normalize_reflection
+
+        self.assertIsNone(_normalize_reflection("garbage"))
+
+    def test_adapter_polls_both_files(self):
+        """HookRunnerAdapter reads from both hook-log and reflection files."""
+        from unified_brain.adapters.hook_runner import HookRunnerAdapter
+
+        hook_log = os.path.join(self.tmpdir, "hook-log.jsonl")
+        refl_log = os.path.join(self.tmpdir, "self-reflection.jsonl")
+
+        # Create empty files so poller initializes offset
+        open(hook_log, "w").close()
+        open(refl_log, "w").close()
+
+        adapter = HookRunnerAdapter({
+            "hook_log_path": hook_log,
+            "reflection_log_path": refl_log,
+        })
+        asyncio.run(adapter.start())
+
+        # First poll initializes offsets
+        events = asyncio.run(adapter.poll())
+        self.assertEqual(len(events), 0)
+
+        # Append to both files
+        with open(hook_log, "a") as f:
+            f.write(json.dumps({"event": "PreToolUse", "module": "test.js", "result": "allow"}) + "\n")
+        with open(refl_log, "a") as f:
+            f.write(json.dumps({"verdict": "good", "issues": []}) + "\n")
+
+        events = asyncio.run(adapter.poll())
+        self.assertEqual(len(events), 2)
+        sources = {e["channel"] for e in events}
+        self.assertEqual(sources, {"hook-log", "self-reflection"})
+
+    def test_adapter_skips_empty_lines(self):
+        """Adapter handles files with blank lines gracefully."""
+        from unified_brain.adapters.hook_runner import HookRunnerAdapter
+
+        hook_log = os.path.join(self.tmpdir, "hook-log.jsonl")
+        open(hook_log, "w").close()
+
+        adapter = HookRunnerAdapter({
+            "hook_log_path": hook_log,
+            "reflection_log_path": os.path.join(self.tmpdir, "none.jsonl"),
+        })
+        asyncio.run(adapter.start())
+        asyncio.run(adapter.poll())  # Initialize
+
+        with open(hook_log, "a") as f:
+            f.write("\n\n")
+            f.write(json.dumps({"event": "Test", "module": "m", "result": "ok"}) + "\n")
+            f.write("\n")
+
+        events = asyncio.run(adapter.poll())
+        self.assertEqual(len(events), 1)
+
+    def test_event_ids_are_unique(self):
+        """Different JSONL lines produce different event IDs."""
+        from unified_brain.adapters.hook_runner import _normalize_hook_log
+
+        e1 = _normalize_hook_log(json.dumps({"event": "A", "module": "m", "result": "x"}))
+        e2 = _normalize_hook_log(json.dumps({"event": "B", "module": "m", "result": "y"}))
+        self.assertNotEqual(e1["id"], e2["id"])
+
+
 if __name__ == "__main__":
     unittest.main()

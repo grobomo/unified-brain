@@ -21,6 +21,7 @@ from pathlib import Path
 
 from .service import BrainService
 from .adapters.github import GitHubAdapter
+from .adapters.hook_runner import HookRunnerAdapter
 from .adapters.slack import SlackAdapter
 from .adapters.teams import TeamsAdapter
 from .adapters.webhook import WebhookAdapter
@@ -314,6 +315,9 @@ async def run_service(config: dict, once: bool = False,
             brain=service.brain,
             context_builder=service.context_builder,
         ))
+    if adapters_config.get("hook_runner", {}).get("enabled", False):
+        hr_config = adapters_config["hook_runner"]
+        service.add_adapter(HookRunnerAdapter(hr_config))
 
     stats["adapters"] = len(service.adapters)
     logger.info(f"Starting with {len(service.adapters)} adapters, interval={service.interval}s")
