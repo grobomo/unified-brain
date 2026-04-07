@@ -3500,5 +3500,293 @@ class TestReflectionTaskStore(unittest.TestCase):
         self.assertEqual(counts.get("analyzing"), 1)
 
 
+###############################################################################
+# T055 — Reflection implementer (file edit, rollback, monitoring, prompt enrichment)
+###############################################################################
+
+from unified_brain.implementer import (
+    FileEditor,
+    ReflectionMonitor,
+    build_reflection_context,
+    enrich_prompt_with_reflection,
+)
+
+
+class TestFileEditor(unittest.TestCase):
+    """T055a-b: File backup, edit, and rollback."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.editor = FileEditor(self.tmpdir)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_read_missing_file(self):
+        self.assertEqual(self.editor.read("nonexistent.js"), "")
+
+    def test_write_and_read(self):
+        self.editor.write("test.js", "console.log('hello');")
+        content = self.editor.read("test.js")
+        self.assertEqual(content, "console.log('hello');")
+
+    def test_backup_returns_content(self):
+        self.editor.write("mod.js", "original")
+        backup = self.editor.backup("mod.js")
+        self.assertEqual(backup, "original")
+
+    def test_rollback_restores_content(self):
+        self.editor.write("mod.js", "original")
+        self.editor.write("mod.js", "modified")
+        self.editor.rollback("mod.js", "original")
+        self.assertEqual(self.editor.read("mod.js"), "original")
+
+    def test_write_creates_subdirectories(self):
+        self.editor.write("sub/dir/mod.js", "content")
+        self.assertEqual(self.editor.read("sub/dir/mod.js"), "content")
+
+    def test_path_traversal_blocked(self):
+        with self.assertRaises(ValueError):
+            self.editor.read("../../etc/passwd")
+
+
+class TestReflectionMonitor(unittest.TestCase):
+    """T055e: Service loop monitoring — checkpoint evaluation, advancing, rollback."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.conn = sqlite3.connect(":memory:")
+        self.conn.row_factory = sqlite3.Row
+        self.task_store = ReflectionTaskStore(self.conn)
+        self.editor = FileEditor(self.tmpdir)
+        self.score_file = os.path.join(self.tmpdir, "reflection-score.json")
+        self.monitor = ReflectionMonitor(
+            task_store=self.task_store,
+            file_editor=self.editor,
+            score_file=self.score_file,
+        )
+
+    def tearDown(self):
+        self.conn.close()
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _write_score(self, points):
+        with open(self.score_file, "w") as f:
+            json.dump({"points": points, "level": 1, "streak": 0, "interventions": 0}, f)
+
+    def test_read_score_missing_file(self):
+        score = self.monitor.read_score()
+        self.assertEqual(score["points"], 0)
+
+    def test_read_score_valid_file(self):
+        self._write_score(150)
+        score = self.monitor.read_score()
+        self.assertEqual(score["points"], 150)
+
+    def test_no_monitoring_tasks_returns_empty(self):
+        results = self.monitor.check_monitoring_tasks()
+        self.assertEqual(results, [])
+
+    def test_advancing_on_positive_score(self):
+        """Task advances when score stays above baseline."""
+        self._write_score(160)
+        t = ReflectionTask(
+            target_file="test.js",
+            prediction=Prediction(expected_score_delta=10),
+            score_baseline=150,
+        )
+        t.state = TaskState.MONITORING
+        t.implemented_at = time.time() - 60  # Due for check
+        self.task_store.save(t)
+
+        results = self.monitor.check_monitoring_tasks()
+        self.assertEqual(len(results), 1)
+        task, action = results[0]
+        self.assertEqual(action, "advancing")
+        self.assertEqual(task.backoff_index, 1)
+
+    def test_verified_on_final_checkpoint(self):
+        """Task is verified after passing the final backoff interval."""
+        self._write_score(160)
+        t = ReflectionTask(
+            target_file="test.js",
+            prediction=Prediction(expected_score_delta=10),
+            score_baseline=150,
+            backoff_index=len(BACKOFF_INTERVALS) - 1,  # Final interval
+        )
+        t.state = TaskState.MONITORING
+        t.implemented_at = time.time() - 3600  # Well past any interval
+        self.task_store.save(t)
+
+        results = self.monitor.check_monitoring_tasks()
+        self.assertEqual(len(results), 1)
+        task, action = results[0]
+        self.assertEqual(action, "verified")
+        self.assertEqual(task.state, TaskState.VERIFIED)
+
+    def test_rollback_on_score_drop(self):
+        """Task rolls back when score drops below baseline."""
+        # Write the original file
+        self.editor.write("test.js", "modified content")
+        self._write_score(140)  # Below baseline of 150
+
+        t = ReflectionTask(
+            target_file="test.js",
+            backup_content="original content",
+            prediction=Prediction(expected_score_delta=10),
+            score_baseline=150,
+        )
+        t.state = TaskState.MONITORING
+        t.implemented_at = time.time() - 60
+        self.task_store.save(t)
+
+        results = self.monitor.check_monitoring_tasks()
+        task, action = results[0]
+        self.assertEqual(action, "rolled_back")
+        self.assertEqual(task.state, TaskState.ANALYZING)
+        # File should be restored
+        self.assertEqual(self.editor.read("test.js"), "original content")
+
+    def test_rollback_on_prediction_mismatch(self):
+        """Task rolls back when prediction accuracy is too low, even if score is up."""
+        self.editor.write("test.js", "modified")
+        self._write_score(200)  # Way above baseline — unexpectedly good
+
+        t = ReflectionTask(
+            target_file="test.js",
+            backup_content="original",
+            prediction=Prediction(expected_score_delta=5),  # Predicted small change
+            score_baseline=150,
+        )
+        t.state = TaskState.MONITORING
+        t.implemented_at = time.time() - 60
+        self.task_store.save(t)
+
+        results = self.monitor.check_monitoring_tasks()
+        task, action = results[0]
+        self.assertEqual(action, "rolled_back")
+        self.assertEqual(self.editor.read("test.js"), "original")
+
+    def test_max_attempts_exceeded(self):
+        """Task fails after exceeding max attempts."""
+        self._write_score(140)
+        t = ReflectionTask(
+            target_file="test.js",
+            backup_content="original",
+            prediction=Prediction(expected_score_delta=10),
+            score_baseline=150,
+            attempts=3,
+            max_attempts=3,
+        )
+        t.state = TaskState.MONITORING
+        t.implemented_at = time.time() - 60
+        self.task_store.save(t)
+
+        results = self.monitor.check_monitoring_tasks()
+        task, action = results[0]
+        self.assertEqual(action, "failed")
+
+
+class TestImplementTask(unittest.TestCase):
+    """T055a: implement_task — backup, predict, write, transition."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.conn = sqlite3.connect(":memory:")
+        self.conn.row_factory = sqlite3.Row
+        self.task_store = ReflectionTaskStore(self.conn)
+        self.editor = FileEditor(self.tmpdir)
+        self.score_file = os.path.join(self.tmpdir, "reflection-score.json")
+        with open(self.score_file, "w") as f:
+            json.dump({"points": 100}, f)
+        self.monitor = ReflectionMonitor(
+            task_store=self.task_store,
+            file_editor=self.editor,
+            score_file=self.score_file,
+        )
+
+    def tearDown(self):
+        self.conn.close()
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_implement_task_full_flow(self):
+        """implement_task backs up, writes, sets prediction, transitions to MONITORING."""
+        self.editor.write("gate.js", "old code")
+
+        t = ReflectionTask(target_file="gate.js", diagnosis="false positives")
+        t.transition(TaskState.ANALYZING)
+        pred = Prediction(expected_score_delta=5, confidence=0.8)
+
+        self.monitor.implement_task(t, "new code", pred)
+
+        self.assertEqual(t.state, TaskState.MONITORING)
+        self.assertEqual(t.backup_content, "old code")
+        self.assertEqual(t.prediction.expected_score_delta, 5.0)
+        self.assertEqual(t.score_baseline, 100.0)
+        self.assertEqual(self.editor.read("gate.js"), "new code")
+        self.assertGreater(t.implemented_at, 0)
+
+    def test_implement_task_no_target_file_raises(self):
+        t = ReflectionTask()
+        t.transition(TaskState.ANALYZING)
+        with self.assertRaises(ValueError):
+            self.monitor.implement_task(t, "content", Prediction())
+
+
+class TestReflectionPromptEnrichment(unittest.TestCase):
+    """T055c: Brain prompt enrichment with reflection context."""
+
+    def setUp(self):
+        self.conn = sqlite3.connect(":memory:")
+        self.conn.row_factory = sqlite3.Row
+        self.task_store = ReflectionTaskStore(self.conn)
+
+    def tearDown(self):
+        self.conn.close()
+
+    def test_empty_context(self):
+        ctx = build_reflection_context(self.task_store)
+        self.assertEqual(ctx["active_tasks"], [])
+        self.assertEqual(ctx["module_calibration"], {})
+
+    def test_active_tasks_in_context(self):
+        t = ReflectionTask(diagnosis="test pattern", target_file="spec-gate.js")
+        self.task_store.save(t)
+        ctx = build_reflection_context(self.task_store)
+        self.assertEqual(len(ctx["active_tasks"]), 1)
+        self.assertEqual(ctx["active_tasks"][0]["diagnosis"], "test pattern")
+
+    def test_enrich_prompt_adds_section(self):
+        parts = ["## Event", "Source: hook_runner"]
+        ctx = {
+            "active_tasks": [{"state": "monitoring", "diagnosis": "false positives",
+                              "target_file": "spec-gate.js", "attempts": 1, "backoff_index": 2}],
+            "module_calibration": {"spec-gate": 0.85},
+            "recent_outcomes": [{"task_id": "refl-abc", "state": "closed",
+                                 "diagnosis": "test", "attempts": 1, "prediction_accuracy": 0.9}],
+        }
+        enrich_prompt_with_reflection(parts, ctx)
+        joined = "\n".join(parts)
+        self.assertIn("Self-Reflection Status", joined)
+        self.assertIn("Active tasks: 1", joined)
+        self.assertIn("spec-gate: 85%", joined)
+        self.assertIn("refl-abc", joined)
+
+    def test_enrich_prompt_no_op_when_empty(self):
+        parts = ["original"]
+        enrich_prompt_with_reflection(parts, {"active_tasks": [], "module_calibration": {}, "recent_outcomes": []})
+        self.assertEqual(parts, ["original"])
+
+    def test_recent_outcomes_in_context(self):
+        t = ReflectionTask(diagnosis="closed task")
+        t.add_checkpoint(100, 0.9, "verified")
+        t.state = TaskState.CLOSED
+        t.closed_at = time.time()
+        self.task_store.save(t)
+        ctx = build_reflection_context(self.task_store)
+        self.assertEqual(len(ctx["recent_outcomes"]), 1)
+        self.assertEqual(ctx["recent_outcomes"][0]["prediction_accuracy"], 0.9)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -319,6 +319,17 @@ async def run_service(config: dict, once: bool = False,
         hr_config = adapters_config["hook_runner"]
         service.add_adapter(HookRunnerAdapter(hr_config))
 
+        # Wire up reflection monitor if hook_runner adapter is enabled
+        from .implementer import FileEditor, ReflectionMonitor
+        reflection_config = hr_config.get("reflection", {})
+        file_editor = FileEditor(reflection_config.get("hooks_dir", ""))
+        service.reflection_monitor = ReflectionMonitor(
+            task_store=service.reflection_store,
+            file_editor=file_editor,
+            memory=service.memory,
+            score_file=reflection_config.get("score_file", ""),
+        )
+
     stats["adapters"] = len(service.adapters)
     logger.info(f"Starting with {len(service.adapters)} adapters, interval={service.interval}s")
 

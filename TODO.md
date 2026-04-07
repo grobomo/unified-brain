@@ -133,13 +133,13 @@ Data files (all in `~/.claude/hooks/`):
 
 - [x] T053: Hook-runner channel adapter — ingests hook-log.jsonl + self-reflection.jsonl as events
 - [x] T054: ReflectionTask lifecycle — state machine (detect → predict → implement → monitor → verify → close), exponential backoff (30s→30m), rollback on prediction mismatch, max 3 attempts
-- [ ] T055: Reflection implementer — file backup/edit/rollback for hook modules, brain prompt enrichment with prediction history, per-module calibration in Tier 2 memory
+- [x] T055: Reflection implementer — file backup/edit/rollback for hook modules, brain prompt enrichment with prediction history, per-module calibration in Tier 2 memory
 - [ ] T056: Brain-owned score — prediction accuracy (70%) + user interrupt rate (30%), rolling tracker, score persistence, Prometheus metrics, reflection-findings.json bridge
 
 ## Session Handoff
-PRs #1-32 merged/open. 54 tasks done (T001-T054), spec 007 in progress.
-- SERVICE IS LIVE locally: interval=3s, health on :8790, all adapters connected
-- 215 tests passing, zero external deps for core
-- Branch 033-T053-hook-runner-adapter: T053 + T054 done, spec 007 v2 (closed-loop self-improvement)
+PRs #1-32 merged/open. 55 tasks done (T001-T055), spec 007 in progress.
+- 236 tests passing, zero external deps for core
+- Branch 034-T055-reflection-implementer: T054 + T055 done
 - T054: reflection.py — ReflectionTask data model, state machine, Prediction, ReflectionTaskStore (SQLite), 32 tests
-- Next: T055 (reflection implementer — file edit/rollback, brain prompt enrichment, service loop wiring)
+- T055: implementer.py — FileEditor (backup/edit/rollback), ReflectionMonitor (checkpoint eval, backoff), prompt enrichment, service loop wiring, 21 tests
+- Next: T056 (brain-owned score — prediction accuracy tracker, Prometheus metrics, reflection-findings.json bridge)

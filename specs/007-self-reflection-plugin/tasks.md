@@ -19,13 +19,13 @@
 - [x] T054h: Max attempts cap (default 3) to prevent infinite loops
 - [x] T054i: Tests for lifecycle (32 tests: state transitions, backoff, rollback, prediction matching, store CRUD)
 
-## T055: Reflection implementer
-- [ ] T055a: File backup + edit for hook-runner JS modules
-- [ ] T055b: Rollback from backup on score drop or prediction mismatch
-- [ ] T055c: Brain prompt enrichment for hook-runner events (three-tier memory + prediction history)
-- [ ] T055d: Prediction accuracy tracking in Tier 2 memory (per-module calibration)
-- [ ] T055e: Wire into service loop — check monitoring tasks each cycle, advance backoff
-- [ ] T055f: Tests for file edit, backup, rollback, prompt enrichment
+## T055: Reflection implementer (DONE)
+- [x] T055a: File backup + edit for hook-runner JS modules (FileEditor with path traversal protection)
+- [x] T055b: Rollback from backup on score drop or prediction mismatch
+- [x] T055c: Brain prompt enrichment for hook-runner events (three-tier memory + prediction history)
+- [x] T055d: Prediction accuracy tracking in Tier 2 memory (per-module calibration, rolling avg)
+- [x] T055e: Wire into service loop — ReflectionMonitor in run_cycle, runner wiring
+- [x] T055f: Tests (21 tests: file edit, backup, rollback, monitoring, prompt enrichment)
 
 ## T056: Brain-owned score + bridge
 - [ ] T056a: BrainScore — prediction accuracy (0.7 weight) + user interrupt rate (0.3 weight)
