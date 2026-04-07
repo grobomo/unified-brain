@@ -152,5 +152,7 @@ track whether the pattern recurs across sessions.
 ## Session Handoff
 PRs #1-33 merged/open. 58 tasks done (T001-T058), spec 007 complete.
 - 252 tests passing, zero external deps for core
-- Branch 035-T057-dry-cleanup: T057-T058 done (DRY refactor + README update)
-- Next: T059 (loop pattern analyzer from hook-runner T335) or merge PRs + new spec
+- Branch 035-T057-dry-cleanup: T057-T058 done, needs PR
+- Open PRs: #33 (spec 007: T053-T056), needs PR for #035 branch (T057-T058)
+- SHTD workflow state file uses "completed" not "complete" (workflow.js line 269)
+- Next: T059 (loop pattern analyzer from hook-runner T335)
