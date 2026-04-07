@@ -4555,5 +4555,182 @@ class TestLoopAnalyzerServiceIntegration(unittest.TestCase):
         service.store.close()
 
 
+class TestSystemMonitorAdapter(unittest.TestCase):
+    """Tests for SystemMonitorAdapter — JSON file poller (T060)."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _write_event(self, filename, data):
+        path = os.path.join(self.tmpdir, filename)
+        with open(path, "w") as f:
+            json.dump(data, f)
+        return path
+
+    def _make_event(self, **overrides):
+        base = {
+            "type": "focus_steal",
+            "timestamp": "2026-04-06 23:36:56.718",
+            "process": {
+                "pid": 356,
+                "name": "python.exe",
+                "exe_path": "C:\\Program Files\\Python312\\python.exe",
+                "command_line": "python test.py",
+            },
+            "parent_chain": "python.exe(356) -> bash.exe(5256)",
+            "classification": "SAFE",
+            "source_project": None,
+        }
+        base.update(overrides)
+        return base
+
+    def test_poll_reads_json_files(self):
+        """Adapter reads .json files from events dir."""
+        from unified_brain.adapters.system_monitor import SystemMonitorAdapter
+
+        self._write_event("event1.json", self._make_event())
+        self._write_event("event2.json", self._make_event(
+            source_project="_grobomo/hook-runner",
+            process={"pid": 100, "name": "cmd.exe", "exe_path": "", "command_line": ""},
+        ))
+
+        adapter = SystemMonitorAdapter({"events_dir": self.tmpdir})
+        events = asyncio.run(adapter.poll())
+
+        self.assertEqual(len(events), 2)
+        self.assertEqual(events[0]["source"], "system-monitor")
+        self.assertEqual(events[0]["channel"], "focus-events")
+        self.assertEqual(events[0]["event_type"], "focus_steal")
+
+    def test_poll_marks_consumed_as_processed(self):
+        """After polling, .json files are renamed to .json.processed."""
+        from unified_brain.adapters.system_monitor import SystemMonitorAdapter
+
+        self._write_event("event1.json", self._make_event())
+        adapter = SystemMonitorAdapter({"events_dir": self.tmpdir})
+        asyncio.run(adapter.poll())
+
+        files = os.listdir(self.tmpdir)
+        self.assertEqual(len(files), 1)
+        self.assertTrue(files[0].endswith(".json.processed"))
+        # No .json files remain
+        json_files = [f for f in files if f.endswith(".json") and not f.endswith(".processed")]
+        self.assertEqual(len(json_files), 0)
+
+    def test_poll_skips_processed_files(self):
+        """Already-processed files are not re-ingested."""
+        from unified_brain.adapters.system_monitor import SystemMonitorAdapter
+
+        self._write_event("event1.json.processed", self._make_event())
+        adapter = SystemMonitorAdapter({"events_dir": self.tmpdir})
+        events = asyncio.run(adapter.poll())
+        self.assertEqual(len(events), 0)
+
+    def test_poll_handles_missing_dir(self):
+        """Adapter returns empty list if events dir doesn't exist."""
+        from unified_brain.adapters.system_monitor import SystemMonitorAdapter
+
+        adapter = SystemMonitorAdapter({"events_dir": "/nonexistent/path"})
+        events = asyncio.run(adapter.poll())
+        self.assertEqual(len(events), 0)
+
+    def test_poll_handles_invalid_json(self):
+        """Invalid JSON files are renamed to .error."""
+        from unified_brain.adapters.system_monitor import SystemMonitorAdapter
+
+        path = os.path.join(self.tmpdir, "bad.json")
+        with open(path, "w") as f:
+            f.write("not valid json{{{")
+
+        adapter = SystemMonitorAdapter({"events_dir": self.tmpdir})
+        events = asyncio.run(adapter.poll())
+        self.assertEqual(len(events), 0)
+
+        files = os.listdir(self.tmpdir)
+        self.assertTrue(any(f.endswith(".error") for f in files))
+
+    def test_normalize_with_source_project(self):
+        """Events with source_project include project name in title."""
+        from unified_brain.adapters.system_monitor import _normalize_event
+
+        data = self._make_event(source_project="_grobomo/system-monitor")
+        event = _normalize_event("/tmp/test.json", data)
+
+        self.assertIsNotNone(event)
+        self.assertIn("_grobomo/system-monitor", event["title"])
+        self.assertEqual(event["metadata"]["source_project"], "_grobomo/system-monitor")
+
+    def test_normalize_without_source_project(self):
+        """Events without source_project show pid in title."""
+        from unified_brain.adapters.system_monitor import _normalize_event
+
+        data = self._make_event(source_project=None)
+        event = _normalize_event("/tmp/test.json", data)
+
+        self.assertIn("pid 356", event["title"])
+        self.assertIsNone(event["metadata"]["source_project"])
+
+    def test_normalize_event_id_uses_filename(self):
+        """Event ID is derived from filename stem."""
+        from unified_brain.adapters.system_monitor import _normalize_event
+
+        data = self._make_event()
+        event = _normalize_event("/events/20260406-233656-718-focus-356.json", data)
+        self.assertEqual(event["id"], "sysmon:20260406-233656-718-focus-356")
+
+    def test_normalize_body_contains_process_info(self):
+        """Body includes process details for brain context."""
+        from unified_brain.adapters.system_monitor import _normalize_event
+
+        data = self._make_event()
+        event = _normalize_event("/tmp/test.json", data)
+
+        self.assertIn("python.exe", event["body"])
+        self.assertIn("pid 356", event["body"])
+        self.assertIn("SAFE", event["body"])
+
+    def test_normalize_classification_preserved(self):
+        """Classification is preserved in metadata."""
+        from unified_brain.adapters.system_monitor import _normalize_event
+
+        data = self._make_event(classification="SUSPICIOUS")
+        event = _normalize_event("/tmp/test.json", data)
+        self.assertEqual(event["metadata"]["classification"], "SUSPICIOUS")
+
+    def test_poll_processes_files_in_sorted_order(self):
+        """Files are processed in alphabetical order (chronological by naming convention)."""
+        from unified_brain.adapters.system_monitor import SystemMonitorAdapter
+
+        self._write_event("20260406-000001-event.json", self._make_event(
+            process={"pid": 1, "name": "first.exe", "exe_path": "", "command_line": ""},
+        ))
+        self._write_event("20260406-000002-event.json", self._make_event(
+            process={"pid": 2, "name": "second.exe", "exe_path": "", "command_line": ""},
+        ))
+
+        adapter = SystemMonitorAdapter({"events_dir": self.tmpdir})
+        events = asyncio.run(adapter.poll())
+
+        self.assertEqual(len(events), 2)
+        self.assertEqual(events[0]["author"], "first.exe")
+        self.assertEqual(events[1]["author"], "second.exe")
+
+    def test_second_poll_returns_empty_after_consumption(self):
+        """Second poll returns nothing since files were already consumed."""
+        from unified_brain.adapters.system_monitor import SystemMonitorAdapter
+
+        self._write_event("event.json", self._make_event())
+        adapter = SystemMonitorAdapter({"events_dir": self.tmpdir})
+
+        events1 = asyncio.run(adapter.poll())
+        self.assertEqual(len(events1), 1)
+
+        events2 = asyncio.run(adapter.poll())
+        self.assertEqual(len(events2), 0)
+
+
 if __name__ == "__main__":
     unittest.main()

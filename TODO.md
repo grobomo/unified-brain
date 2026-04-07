@@ -24,7 +24,7 @@ Webhook/API        ──→  Three-tier Memory           ──DISPATCH──�
 ```
 
 ## What exists today
-- unified-brain — self-contained: EventStore (SQLite+FTS), brain.py (pluggable LLM), dispatcher.py (pluggable transport), context.py, memory.py, feedback.py, metrics.py, executor.py, loop_analyzer.py, adapters (GitHub, Teams, Webhook, HookRunner), 273 tests
+- unified-brain — self-contained: EventStore (SQLite+FTS), brain.py (pluggable LLM), dispatcher.py (pluggable transport), context.py, memory.py, feedback.py, metrics.py, executor.py, loop_analyzer.py, adapters (GitHub, Teams, Webhook, HookRunner, SystemMonitor), 285 tests
 - ccc-manager — task execution: BridgeInput/SQSInput, workers (local/K8s/EC2), fleet coordination, verification, Prometheus
 - Active respond: ActionExecutor posts GitHub comments + Teams messages directly via APIs
 - Observability: Prometheus /metrics endpoint, feedback loop tracks dispatch outcomes
@@ -155,7 +155,7 @@ System-monitor emits JSON events to `~/.system-monitor/events/` when cmd.exe/pyt
 processes appear (potential focus stealers). Brain needs a channel adapter to consume these events,
 analyze the source project, write TODOs in offending projects, and dispatch fix sessions.
 
-- [ ] T060: System monitor channel adapter — polls `~/.system-monitor/events/*.json`, yields normalized events (type=focus_steal), dedup by event filename, marks consumed (rename to .processed or delete)
+- [x] T060: System monitor channel adapter — polls `~/.system-monitor/events/*.json`, yields normalized events (type=focus_steal), dedup by event filename, marks consumed (rename to .processed). 12 tests.
 - [ ] T061: Focus-steal action router — when brain sees focus_steal event with `source_project` set, write a TODO in that project's TODO.md with fix instructions (CREATE_NO_WINDOW, -WindowStyle Hidden, etc), then dispatch `context_reset.py --project-dir <project>` to start a fix session
 - [ ] T062: Focus-steal without source_project — when source is unknown (e.g. Azure CLI, Intune agent), log to Tier 2 memory as "system noise" for pattern tracking, no dispatch
 
