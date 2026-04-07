@@ -13,3 +13,5 @@ build/
 *.local.yaml
 *.local.yml
 *.local.json
+.workflow-state.json
+notes/
