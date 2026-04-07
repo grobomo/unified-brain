@@ -24,7 +24,7 @@ Webhook/API        ──→  Three-tier Memory           ──DISPATCH──�
 ```
 
 ## What exists today
-- unified-brain — self-contained: EventStore (SQLite+FTS), brain.py (pluggable LLM), dispatcher.py (pluggable transport), context.py, memory.py, feedback.py, metrics.py, executor.py, loop_analyzer.py, adapters (GitHub, Teams, Webhook, HookRunner, SystemMonitor), focus_steal.py (action router), ccc_bridge.py (CCC dispatch + result monitor), 310 tests
+- unified-brain — self-contained: EventStore (SQLite+FTS), brain.py (pluggable LLM), dispatcher.py (pluggable transport), context.py, memory.py, feedback.py, metrics.py, executor.py, loop_analyzer.py, adapters (GitHub, Teams, Webhook, HookRunner, SystemMonitor), focus_steal.py (action router), ccc_bridge.py (CCC dispatch + result monitor), ssh_server.py, idle_loop.py, ~317 tests
 - ccc-manager — **ARCHIVED** (absorbed by brain). Useful patterns: dispatcher bridge, worktree isolation, fleet heartbeat
 - Active respond: ActionExecutor posts GitHub comments + Teams messages directly via APIs
 - Observability: Prometheus /metrics endpoint, feedback loop tracks dispatch outcomes
@@ -199,12 +199,26 @@ Interactive: SSH chat, /ask endpoint     No UI: headless execution only
 - [ ] T072: Port fleet heartbeat — peer discovery, stale worker pruning. Rewrite in Python for brain's worker monitoring.
 
 ## Session Handoff
-PRs #1-35 open/merged. 59 tasks done (T001-T059). Spec 008 written.
-- 273 tests passing, zero external deps for core
-- Branch 036-T059-loop-analyzer: T059 done, spec 008 committed, needs push
-- Open PRs: #32 merged, #33/#34/#35 need rebase onto main (squash merge broke chain)
-- PR chain fix: retarget #33/#34/#35 to main, rebase each, merge in order
-- `/brain` skill created at `~/.claude/skills/brain-chat/` but needs rework (can't use subprocess claude -p from Claude Code — brain's own LLM backend works standalone only)
-- asyncssh installed via pip for T066
-- User direction: brain = persistent always-on thinker in RONE with SSH chat. CCC (claude-portable) = stateless worker. ccc-manager archived. Brain dispatches WORK to CCC, does its own THINKING via claude -p/API.
-- Next: T063 (archive ccc-manager), T064 (CCC bridge adapter), T066 (SSH chat server)
+68 tasks done (T001-T069 minus T068-T069). ~317 tests. 8 specs.
+
+**This session (T060-T067):**
+- T060: SystemMonitorAdapter — polls ~/.system-monitor/events/*.json (12 tests)
+- T061-T062: Focus-steal router — writes TODOs in offending projects, tracks noise in Tier 2 (10 tests)
+- T063: Archived ccc-manager — redirected to brain Phase 16
+- T064: CCCBridge — dispatches WORK to claude-portable via git relay (10 tests)
+- T065: CCC result monitor — polls bridge, records feedback, retries with guard (5 tests)
+- T066: SSH chat server — asyncssh PTY with auto host key (7 tests)
+- T067: Idle loop — per-task intervals for compaction, CCC check, reflection, insights (10 tests)
+
+**Branches pushed (all need PRs to main):**
+- 037-T061-focus-steal-router (T060-T062)
+- 038-T063-archive-ccc-manager (T063)
+- 039-T064-ccc-bridge (T064)
+- 040-T065-ccc-result-monitor (T065)
+- 041-T066-ssh-chat (T066)
+- 042-T067-idle-loop (T067)
+
+**Pre-existing PR chain:** #33/#34/#35 need rebase onto main
+
+**Next:** T068 (email adapter), T069 (calendar adapter), T070-T072 (port ccc-manager patterns)
+**Also:** Create PRs for all pushed branches, merge older PRs
