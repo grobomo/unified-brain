@@ -24,7 +24,7 @@ Webhook/API        ──→  Three-tier Memory           ──DISPATCH──�
 ```
 
 ## What exists today
-- unified-brain — self-contained: EventStore (SQLite+FTS), brain.py (pluggable LLM), dispatcher.py (pluggable transport), context.py, memory.py, feedback.py, metrics.py, executor.py, loop_analyzer.py, adapters (GitHub, Teams, Webhook, HookRunner, SystemMonitor), focus_steal.py (action router), 295 tests
+- unified-brain — self-contained: EventStore (SQLite+FTS), brain.py (pluggable LLM), dispatcher.py (pluggable transport), context.py, memory.py, feedback.py, metrics.py, executor.py, loop_analyzer.py, adapters (GitHub, Teams, Webhook, HookRunner, SystemMonitor), focus_steal.py (action router), ccc_bridge.py (CCC dispatch), 305 tests
 - ccc-manager — **ARCHIVED** (absorbed by brain). Useful patterns: dispatcher bridge, worktree isolation, fleet heartbeat
 - Active respond: ActionExecutor posts GitHub comments + Teams messages directly via APIs
 - Observability: Prometheus /metrics endpoint, feedback loop tracks dispatch outcomes
@@ -188,7 +188,7 @@ Interactive: SSH chat, /ask endpoint     No UI: headless execution only
 ```
 
 - [x] T063: Archive ccc-manager — marked absorbed in ccc-manager/TODO.md, redirected to brain Phase 16. Useful code catalogued (dispatcher patterns, worktree isolation, fleet coordination, Helm/CF templates).
-- [ ] T064: CCC bridge adapter — brain dispatches WORK tasks to ccc (claude-portable) via its existing dispatch mechanism (bridge dir, scripts/fleet/). Brain writes task JSON, ccc picks it up.
+- [x] T064: CCC bridge adapter — brain dispatches WORK tasks to ccc (claude-portable) via git relay repo. CCCBridge writes task JSON to requests/pending/, polls completed/failed for results. 10 tests.
 - [ ] T065: CCC result monitor — brain polls for completed ccc tasks, verifies outcomes (prediction/outcome comparison from T054-T056), re-dispatches or alerts on failure
 - [ ] T066: SSH chat server — asyncssh server in brain, drops users into chat REPL. Brain accessible via `ssh brain@rone-host`. Persistent sessions, conversation history.
 - [ ] T067: Idle loop — brain runs periodic tasks between event cycles: compact memory, check dispatched work, run self-reflection, surface proactive insights ("daydreaming")

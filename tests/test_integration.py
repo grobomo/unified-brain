@@ -4921,5 +4921,171 @@ class TestFocusStealRouter(unittest.TestCase):
         self.assertIn("Investigate", _get_fix_suggestion("unknown.exe", ""))
 
 
+class TestCCCBridge(unittest.TestCase):
+    """Tests for CCC bridge — git relay dispatch (T064)."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.relay_dir = os.path.join(self.tmpdir, "relay-repo")
+        os.makedirs(self.relay_dir)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_dispatch_creates_pending_file(self):
+        """Dispatch writes task JSON to requests/pending/."""
+        from unified_brain.ccc_bridge import CCCBridge
+
+        bridge = CCCBridge({"relay_dir": self.relay_dir})
+        result = bridge.dispatch({
+            "id": "task-001",
+            "content": "Fix the bug in hook-runner",
+            "metadata": {"source_project": "_grobomo/hook-runner"},
+        })
+
+        self.assertEqual(result["status"], "dispatched")
+        self.assertEqual(result["task_id"], "task-001")
+
+        pending = os.path.join(self.relay_dir, "requests", "pending", "task-001.json")
+        self.assertTrue(os.path.exists(pending))
+        with open(pending) as f:
+            data = json.load(f)
+        self.assertEqual(data["sender"], "unified-brain")
+        self.assertEqual(data["text"], "Fix the bug in hook-runner")
+        self.assertEqual(data["source_project"], "_grobomo/hook-runner")
+
+    def test_dispatch_auto_generates_id(self):
+        """Dispatch generates a task ID if not provided."""
+        from unified_brain.ccc_bridge import CCCBridge
+
+        bridge = CCCBridge({"relay_dir": self.relay_dir})
+        result = bridge.dispatch({"content": "Do something"})
+
+        self.assertEqual(result["status"], "dispatched")
+        self.assertTrue(len(result["task_id"]) > 0)
+
+    def test_poll_results_reads_completed(self):
+        """Poll reads and removes completed result files."""
+        from unified_brain.ccc_bridge import CCCBridge
+
+        bridge = CCCBridge({"relay_dir": self.relay_dir})
+        bridge._ensure_dirs()
+
+        # Write a completed result
+        result_file = os.path.join(bridge._completed_dir, "task-001.json")
+        with open(result_file, "w") as f:
+            json.dump({
+                "id": "task-001",
+                "success": True,
+                "output": "PR created",
+                "pr_url": "https://github.com/example/repo/pull/1",
+                "worker": "worker-1",
+            }, f)
+
+        results = bridge.poll_results()
+
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["id"], "task-001")
+        self.assertTrue(results[0]["success"])
+        self.assertIn("PR created", results[0]["output"])
+        # File should be removed after consumption
+        self.assertFalse(os.path.exists(result_file))
+
+    def test_poll_results_reads_failed(self):
+        """Poll reads failed results with success=False."""
+        from unified_brain.ccc_bridge import CCCBridge
+
+        bridge = CCCBridge({"relay_dir": self.relay_dir})
+        bridge._ensure_dirs()
+
+        result_file = os.path.join(bridge._failed_dir, "task-002.json")
+        with open(result_file, "w") as f:
+            json.dump({
+                "id": "task-002",
+                "success": False,
+                "error": "Tests failed",
+            }, f)
+
+        results = bridge.poll_results()
+
+        self.assertEqual(len(results), 1)
+        self.assertFalse(results[0]["success"])
+        self.assertIn("Tests failed", results[0]["error"])
+
+    def test_poll_empty_returns_empty_list(self):
+        """Poll with no results returns empty list."""
+        from unified_brain.ccc_bridge import CCCBridge
+
+        bridge = CCCBridge({"relay_dir": self.relay_dir})
+        results = bridge.poll_results()
+        self.assertEqual(results, [])
+
+    def test_poll_handles_bad_json(self):
+        """Bad JSON result files are renamed to .error."""
+        from unified_brain.ccc_bridge import CCCBridge
+
+        bridge = CCCBridge({"relay_dir": self.relay_dir})
+        bridge._ensure_dirs()
+
+        bad_file = os.path.join(bridge._completed_dir, "bad.json")
+        with open(bad_file, "w") as f:
+            f.write("not valid json{{{")
+
+        results = bridge.poll_results()
+        self.assertEqual(len(results), 0)
+        self.assertTrue(os.path.exists(bad_file + ".error"))
+
+    def test_get_pending_count(self):
+        """Pending count reflects number of pending task files."""
+        from unified_brain.ccc_bridge import CCCBridge
+
+        bridge = CCCBridge({"relay_dir": self.relay_dir})
+        self.assertEqual(bridge.get_pending_count(), 0)
+
+        bridge.dispatch({"id": "a", "content": "task a"})
+        bridge.dispatch({"id": "b", "content": "task b"})
+        self.assertEqual(bridge.get_pending_count(), 2)
+
+    def test_dispatch_includes_context(self):
+        """Dispatch preserves context list in task JSON."""
+        from unified_brain.ccc_bridge import CCCBridge
+
+        bridge = CCCBridge({"relay_dir": self.relay_dir})
+        bridge.dispatch({
+            "id": "ctx-task",
+            "content": "Fix it",
+            "metadata": {"context": ["PR #5 broke CI", "Tests fail on Windows"]},
+        })
+
+        pending = os.path.join(self.relay_dir, "requests", "pending", "ctx-task.json")
+        with open(pending) as f:
+            data = json.load(f)
+        self.assertEqual(len(data["context"]), 2)
+        self.assertIn("PR #5 broke CI", data["context"][0])
+
+    def test_custom_sender(self):
+        """Custom sender name appears in task JSON."""
+        from unified_brain.ccc_bridge import CCCBridge
+
+        bridge = CCCBridge({"relay_dir": self.relay_dir, "sender": "joel-brain"})
+        bridge.dispatch({"id": "s1", "content": "test"})
+
+        pending = os.path.join(self.relay_dir, "requests", "pending", "s1.json")
+        with open(pending) as f:
+            data = json.load(f)
+        self.assertEqual(data["sender"], "joel-brain")
+
+    def test_ensure_dirs_creates_structure(self):
+        """_ensure_dirs creates the full relay directory structure."""
+        from unified_brain.ccc_bridge import CCCBridge
+
+        bridge = CCCBridge({"relay_dir": self.relay_dir})
+        bridge._ensure_dirs()
+
+        for subdir in ["pending", "dispatched", "completed", "failed"]:
+            path = os.path.join(self.relay_dir, "requests", subdir)
+            self.assertTrue(os.path.isdir(path), f"Missing: {subdir}")
+
+
 if __name__ == "__main__":
     unittest.main()
