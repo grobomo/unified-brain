@@ -20,6 +20,7 @@ from .metrics import (
     adapter_errors, brain_errors,
 )
 from .registry import ProjectRegistry
+from .loop_analyzer import LoopAnalyzer
 from .reflection import ReflectionTaskStore
 
 log = logging.getLogger("unified-brain")
@@ -38,6 +39,10 @@ class BrainService:
         self.feedback = FeedbackStore(self.store.conn)
         self.reflection_store = ReflectionTaskStore(self.store.conn)
         self.reflection_monitor = None  # Set by runner if reflection is enabled
+        self.loop_analyzer = LoopAnalyzer(
+            memory=self.memory,
+            hook_log_path=self.config.get("hook_log_path", ""),
+        )
         self.context_builder = ContextBuilder(
             self.store, self.registry, self.config.get("context", {}),
             memory=self.memory, feedback=self.feedback,
@@ -66,6 +71,18 @@ class BrainService:
                 if events:
                     events_ingested.inc(len(events), adapter=adapter.name)
                     log.info(f"[{adapter.name}] Ingested {len(events)} events")
+
+                    # Check hook-runner reflection events for loop patterns
+                    for event in events:
+                        if (event.get("source") == "hook-runner"
+                                and event.get("channel") == "self-reflection"):
+                            try:
+                                patterns = self.loop_analyzer.process_reflection_event(event)
+                                for p in patterns:
+                                    log.info("[loop] %s -> fix: %s",
+                                             p.root_cause[:60], p.suggested_fix[:60])
+                            except Exception as e:
+                                log.error("[loop] Analysis error: %s", e)
             except Exception as e:
                 adapter_errors.inc(adapter=adapter.name)
                 log.error(f"[{adapter.name}] Poll error: {e}")
@@ -76,6 +93,10 @@ class BrainService:
             try:
                 # Build cross-channel context (same project, same author)
                 context = self.context_builder.build(event)
+                # Enrich with loop pattern history for hook-runner events
+                loop_ctx = self.loop_analyzer.get_context_for_prompt()
+                if loop_ctx:
+                    context["loop_context"] = loop_ctx
                 action = self.brain.analyze(event, context)
                 result = self.dispatcher.dispatch(action)
                 self.store.mark_processed(event["id"])

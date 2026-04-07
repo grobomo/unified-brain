@@ -24,7 +24,7 @@ Webhook/API        ──→  Three-tier Memory           ──DISPATCH──�
 ```
 
 ## What exists today
-- unified-brain — self-contained: EventStore (SQLite+FTS), brain.py (pluggable LLM), dispatcher.py (pluggable transport), context.py, memory.py, feedback.py, metrics.py, executor.py, adapters (GitHub, Teams, Webhook), 88 tests
+- unified-brain — self-contained: EventStore (SQLite+FTS), brain.py (pluggable LLM), dispatcher.py (pluggable transport), context.py, memory.py, feedback.py, metrics.py, executor.py, loop_analyzer.py, adapters (GitHub, Teams, Webhook, HookRunner), 273 tests
 - ccc-manager — task execution: BridgeInput/SQSInput, workers (local/K8s/EC2), fleet coordination, verification, Prometheus
 - Active respond: ActionExecutor posts GitHub comments + Teams messages directly via APIs
 - Observability: Prometheus /metrics endpoint, feedback loop tracks dispatch outcomes
@@ -143,16 +143,15 @@ retry patterns, cherry-pick conflicts, manual patching). Self-reflection flags t
 brain should do the deep analysis: identify root cause, suggest systemic fix (automate pipeline),
 track whether the pattern recurs across sessions.
 
-- [ ] T059: Loop pattern analyzer — when reflection adapter receives "unproductive loop" issues, brain should: (1) identify the root cause from command history, (2) suggest an automation fix (e.g. "create a deploy.sh that handles zip+upload+verify"), (3) track recurrence in Tier 3 memory (global patterns). Data source: `reflection-sessions.jsonl` (has failed command counts) + `hook-log.jsonl` (has individual Bash commands).
+- [x] T059: Loop pattern analyzer — detects unproductive loops from reflection events, identifies root cause from Bash command history, suggests automation fixes, tracks recurrence in Tier 3 memory (global patterns). 21 tests.
 
 ## Phase 14: Hardening & Cleanup
 - [x] T057: DRY score file reading — extract read_score_file to utils.py, deduplicate from implementer.py + score.py
 - [x] T058: Update README + docs — reflect spec 007 (reflection plugin, 252 tests, brain score)
 
 ## Session Handoff
-PRs #1-33 merged/open. 58 tasks done (T001-T058), spec 007 complete.
-- 252 tests passing, zero external deps for core
-- Branch 035-T057-dry-cleanup: T057-T058 done, needs PR
-- Open PRs: #33 (spec 007: T053-T056), needs PR for #035 branch (T057-T058)
+PRs #1-34 merged/open. 59 tasks done (T001-T059).
+- 273 tests passing, zero external deps for core
+- Branch 036-T059-loop-analyzer: T059 done, needs PR
+- Open PRs: #33 (spec 007: T053-T056), #34 (T057-T058 DRY cleanup)
 - SHTD workflow state file uses "completed" not "complete" (workflow.js line 269)
-- Next: T059 (loop pattern analyzer from hook-runner T335)

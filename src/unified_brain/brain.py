@@ -255,6 +255,12 @@ class BrainAnalyzer:
                 for e in author[:3]:
                     parts.append(f"- [{e.get('source')}] {e.get('title', '')[:100]}")
 
+            # Loop pattern history (from loop analyzer)
+            loop_ctx = context.get("loop_context")
+            if loop_ctx:
+                parts.append("")
+                parts.append(loop_ctx)
+
             # Feedback from previous actions
             feedback = context.get("feedback")
             if feedback:
