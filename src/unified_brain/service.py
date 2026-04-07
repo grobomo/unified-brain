@@ -22,6 +22,7 @@ from .metrics import (
 from .registry import ProjectRegistry
 from .ccc_bridge import CCCBridge
 from .focus_steal import handle_focus_steal
+from .idle_loop import IdleLoop
 from .loop_analyzer import LoopAnalyzer
 from .reflection import ReflectionTaskStore
 
@@ -51,6 +52,7 @@ class BrainService:
             self.store, self.registry, self.config.get("context", {}),
             memory=self.memory, feedback=self.feedback,
         )
+        self.idle_loop: IdleLoop | None = None  # Set by runner via create_idle_loop()
         self.adapters = []
         self.interval = self.config.get("interval", 60)
         self._cycle_count = 0
@@ -224,6 +226,13 @@ class BrainService:
                 log.debug("[memory] Compaction complete")
             except Exception as e:
                 log.error(f"[memory] Compaction error: {e}")
+
+        # 6. Run idle loop tasks (memory, CCC check, reflection, insights)
+        if self.idle_loop:
+            try:
+                self.idle_loop.tick()
+            except Exception as e:
+                log.error(f"[idle] Tick error: {e}")
 
         elapsed = time.monotonic() - t0
         cycle_duration.set(elapsed)

@@ -5296,5 +5296,155 @@ class TestSSHChatServer(unittest.TestCase):
         self.assertTrue(asyncio.iscoroutinefunction(_handle_ssh_session))
 
 
+class TestIdleLoop(unittest.TestCase):
+    """Tests for idle loop — periodic background tasks (T067)."""
+
+    def test_idle_task_runs_when_due(self):
+        """Task runs when interval has elapsed."""
+        from unified_brain.idle_loop import IdleTask
+
+        calls = []
+        task = IdleTask("test", 0, lambda: calls.append(1))
+        self.assertTrue(task.is_due())
+
+        task.run()
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(task.run_count, 1)
+
+    def test_idle_task_not_due_before_interval(self):
+        """Task doesn't run again until interval elapses."""
+        from unified_brain.idle_loop import IdleTask
+
+        task = IdleTask("test", 9999, lambda: None)
+        task.run()
+        self.assertFalse(task.is_due())
+
+    def test_idle_task_tracks_errors(self):
+        """Errors are counted but don't crash the loop."""
+        from unified_brain.idle_loop import IdleTask
+
+        def _fail():
+            raise ValueError("test error")
+
+        task = IdleTask("test", 0, _fail)
+        task.run()
+
+        self.assertEqual(task.error_count, 1)
+        self.assertEqual(task.run_count, 0)
+        self.assertIn("test error", task.last_error)
+
+    def test_idle_loop_tick_runs_due_tasks(self):
+        """tick() runs all due tasks."""
+        from unified_brain.idle_loop import IdleLoop
+
+        results = []
+        loop = IdleLoop()
+        loop.add_task("a", 0, lambda: results.append("a"))
+        loop.add_task("b", 0, lambda: results.append("b"))
+
+        loop.tick()
+        self.assertEqual(results, ["a", "b"])
+
+    def test_idle_loop_tick_skips_not_due(self):
+        """tick() skips tasks that haven't hit their interval."""
+        from unified_brain.idle_loop import IdleLoop
+
+        results = []
+        loop = IdleLoop()
+        loop.add_task("fast", 0, lambda: results.append("fast"))
+        loop.add_task("slow", 9999, lambda: results.append("slow"))
+
+        # First tick: both run (both at 0 last_run)
+        loop.tick()
+        self.assertIn("fast", results)
+        self.assertIn("slow", results)
+
+        # Second tick: only fast runs again
+        results.clear()
+        # Fast has interval=0 so always due
+        loop.tick()
+        self.assertIn("fast", results)
+        self.assertNotIn("slow", results)
+
+    def test_idle_loop_status(self):
+        """status() returns task info."""
+        from unified_brain.idle_loop import IdleLoop
+
+        loop = IdleLoop()
+        loop.add_task("test", 60, lambda: None)
+
+        status = loop.status()
+        self.assertEqual(len(status), 1)
+        self.assertEqual(status[0]["name"], "test")
+        self.assertEqual(status[0]["interval"], 60)
+        self.assertTrue(status[0]["due"])
+
+    def test_idle_task_to_dict(self):
+        """IdleTask serializes to dict correctly."""
+        from unified_brain.idle_loop import IdleTask
+
+        task = IdleTask("compact", 300, lambda: None)
+        d = task.to_dict()
+
+        self.assertEqual(d["name"], "compact")
+        self.assertEqual(d["interval"], 300)
+        self.assertEqual(d["run_count"], 0)
+        self.assertEqual(d["error_count"], 0)
+        self.assertTrue(d["due"])
+
+    def test_create_idle_loop_wires_standard_tasks(self):
+        """create_idle_loop creates tasks for memory, insight, etc."""
+        from unified_brain.idle_loop import create_idle_loop
+        from unittest.mock import MagicMock
+
+        service = MagicMock()
+        service.ccc_bridge = None
+        service.reflection_monitor = None
+
+        loop = create_idle_loop(service, {"compact_interval": 10})
+
+        # Should have at least memory_compact and insight
+        self.assertGreaterEqual(loop.task_count, 2)
+        names = [t.name for t in loop._tasks]
+        self.assertIn("memory_compact", names)
+        self.assertIn("insight", names)
+
+    def test_create_idle_loop_includes_ccc_when_enabled(self):
+        """CCC check task added when ccc_bridge is set."""
+        from unified_brain.idle_loop import create_idle_loop
+        from unittest.mock import MagicMock
+
+        service = MagicMock()
+        service.ccc_bridge = MagicMock()
+        service.reflection_monitor = None
+
+        loop = create_idle_loop(service)
+
+        names = [t.name for t in loop._tasks]
+        self.assertIn("ccc_check", names)
+
+    def test_service_idle_loop_integration(self):
+        """BrainService runs idle loop tick in cycle."""
+        from unified_brain.service import BrainService
+
+        tmpdir = tempfile.mkdtemp()
+        try:
+            db_path = os.path.join(tmpdir, "test.db")
+            service = BrainService({"db_path": db_path})
+
+            # Attach a simple idle loop
+            from unified_brain.idle_loop import IdleLoop
+            results = []
+            service.idle_loop = IdleLoop()
+            service.idle_loop.add_task("test", 0, lambda: results.append(1))
+
+            asyncio.run(service.run_cycle())
+
+            self.assertEqual(len(results), 1)
+            service.store.close()
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+
 if __name__ == "__main__":
     unittest.main()

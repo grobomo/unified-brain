@@ -27,10 +27,14 @@
 - [x] Tests (7)
 
 ## T067: Idle loop
-- [ ] Periodic memory compaction
-- [ ] Check dispatched work status
-- [ ] Self-reflection cycle
-- [ ] Proactive insights ("daydreaming")
+- [x] IdleTask with per-task intervals, error tracking, due check
+- [x] IdleLoop.tick() runs all due tasks
+- [x] create_idle_loop factory wires standard tasks
+- [x] Periodic memory compaction
+- [x] Check dispatched CCC work status
+- [x] Self-reflection cycle (when monitor available)
+- [x] Proactive insights — loop patterns, feedback trends
+- [x] Tests (10)
 
 ## T068: Email adapter
 - [ ] MS Graph inbox poller
