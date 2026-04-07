@@ -1,6 +1,6 @@
 # Unified Brain
 
-Multi-channel brain service. Ingests events from GitHub, Teams, and future sources through a single LLM-powered analyzer with shared context and three-tier memory.
+Multi-channel brain service. Ingests events from GitHub, Teams, Slack, and webhook sources through a single LLM-powered analyzer with shared context and three-tier memory.
 
 ## Architecture
 
@@ -9,13 +9,13 @@ Communication Channels         unified-brain (THINKER)              ccc-manager 
 ─────────────────────         ─────────────────────                ──────────────────
 GitHub events      ──→  EventStore (SQLite+FTS)                   Workers:
 Teams messages     ──→  Brain Analyzer (pluggable LLM)             - Local (claude -p)
-Webhook/API        ──→  Three-tier Memory           ──DISPATCH──→  - K8s (kubectl exec)
-                        Cross-channel Context                      - EC2 (SSH/SSM)
+Slack messages     ──→  Three-tier Memory           ──DISPATCH──→  - K8s (kubectl exec)
+Webhook/API        ──→  Cross-channel Context                      - EC2 (SSH/SSM)
                         Project Registry                           Fleet coordination
                              │                      ←─RESULT────  Verification
                              ▼
                         Action Router
-                        ├─ RESPOND → GitHub comment / Teams reply
+                        ├─ RESPOND → GitHub comment / Teams reply / Slack message
                         ├─ DISPATCH → ccc-manager bridge/SQS
                         ├─ ALERT → email
                         └─ LOG → memory only
@@ -24,12 +24,12 @@ Webhook/API        ──→  Three-tier Memory           ──DISPATCH──�
 ## Features
 
 - **Single process, single DB** — one SQLite+FTS database for all channels
-- **Channel adapters** — thin adapters normalize events from each source (GitHub, Teams, Webhooks)
-- **Webhook ingestion** — HTTP endpoint accepts events via POST (`/events`, `/events/raw`), with HMAC-SHA256 signature verification
-- **Cross-channel context** — when analyzing a GitHub issue, the brain sees related Teams discussions
+- **4 channel adapters** — GitHub (gh CLI), Teams (MS Graph), Slack (Web API), Webhooks (HTTP POST)
+- **Webhook ingestion** — HTTP endpoint accepts events via POST (`/events`, `/events/raw`), HMAC-SHA256 verification, token bucket rate limiting per IP
+- **Cross-channel context** — when analyzing a GitHub issue, the brain sees related Teams/Slack discussions
 - **Three-tier memory** — Tier 1: hot cache (24h events), Tier 2: per-project summaries, Tier 3: global patterns
 - **Feedback loop** — tracks dispatch/respond outcomes, feeds success/failure patterns back to the brain prompt
-- **Active respond** — posts GitHub comments and Teams messages directly via channel APIs, falls back to outbox
+- **Active respond** — posts GitHub comments, Teams messages, and Slack messages directly via channel APIs, falls back to outbox
 - **Pluggable LLM backend** — subprocess (`claude -p`) for local, Anthropic HTTP API for containers/EC2
 - **Pluggable dispatch transport** — filesystem outbox (local/K8s) or SQS (EC2)
 - **Prometheus metrics** — `/metrics` endpoint with event ingestion rates, brain decisions, dispatch outcomes, cycle duration
@@ -50,9 +50,8 @@ PYTHONPATH=src python -m unified_brain --config config/brain.yaml --once
 # With health endpoint
 PYTHONPATH=src python -m unified_brain --health-port 8790
 
-# Docker
-docker build -t unified-brain .
-docker run -v $(pwd)/data:/app/data unified-brain
+# Docker Compose (brain + Prometheus + Grafana)
+docker compose up -d
 
 # Kubernetes (RONE)
 kubectl apply -k k8s/
@@ -89,9 +88,16 @@ adapters:
       - owner/repo
   teams:
     enabled: false
+  slack:
+    enabled: false
+    bot_token: ${SLACK_BOT_TOKEN}
+    channel_ids:
+      - C0123456789
   webhook:
     enabled: false
     webhook_port: 8791
+    webhook_rate_limit: 10.0  # requests/sec per IP (0 to disable)
+    webhook_rate_burst: 20    # max burst per IP
     # webhook_secret: hmac-secret  # optional HMAC verification
 ```
 
@@ -107,7 +113,7 @@ Secret fields (Teams chat IDs) go in `config/projects.local.json` (gitignored), 
 PYTHONPATH=src python -m pytest tests/ -v
 ```
 
-88 integration tests covering: store, brain, dispatcher, registry, context, memory, outbox, adapters, transport factory, SQS mock, config overlay, env interpolation, active respond, Prometheus metrics, feedback loop, webhook adapter.
+111 integration tests covering: store, brain, dispatcher, registry, context, memory, outbox, adapters (GitHub, Teams, Slack, Webhook), transport factory, SQS mock, config overlay, env interpolation, active respond, Prometheus metrics, feedback loop, rate limiting.
 
 ## Dependencies
 
