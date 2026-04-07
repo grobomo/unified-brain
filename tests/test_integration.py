@@ -5603,5 +5603,140 @@ class TestEmailAdapter(unittest.TestCase):
         self.assertEqual(adapter.filter, "isRead eq false")
 
 
+class TestCalendarAdapter(unittest.TestCase):
+    """Tests for calendar channel adapter (T069)."""
+
+    def _make_event(self, **overrides):
+        base = {
+            "id": "cal-001",
+            "subject": "Sprint Planning",
+            "organizer": {
+                "emailAddress": {"name": "Joel", "address": "joel@example.com"},
+            },
+            "start": {"dateTime": "2026-04-07T14:00:00", "timeZone": "UTC"},
+            "end": {"dateTime": "2026-04-07T15:00:00", "timeZone": "UTC"},
+            "location": {"displayName": "Teams Room 3"},
+            "isOnlineMeeting": True,
+            "onlineMeeting": {"joinUrl": "https://teams.microsoft.com/meet/123"},
+            "isCancelled": False,
+            "isAllDay": False,
+            "attendees": [
+                {
+                    "emailAddress": {"name": "Alice", "address": "alice@example.com"},
+                    "status": {"response": "accepted"},
+                },
+                {
+                    "emailAddress": {"name": "Bob", "address": "bob@example.com"},
+                    "status": {"response": "tentativelyAccepted"},
+                },
+            ],
+            "responseStatus": {"response": "accepted"},
+        }
+        base.update(overrides)
+        return base
+
+    def test_normalize_meeting(self):
+        """Meeting normalizes to brain event."""
+        from unified_brain.adapters.calendar import _normalize_calendar_event
+
+        event = _normalize_calendar_event(self._make_event())
+
+        self.assertEqual(event["source"], "calendar")
+        self.assertEqual(event["channel"], "calendar")
+        self.assertEqual(event["event_type"], "meeting")
+        self.assertEqual(event["author"], "Joel")
+        self.assertEqual(event["title"], "Sprint Planning")
+        self.assertIn("Teams Room 3", event["body"])
+        self.assertIn("Alice", event["body"])
+        self.assertEqual(event["metadata"]["attendee_count"], 2)
+
+    def test_normalize_cancelled_meeting(self):
+        """Cancelled meetings get event_type=meeting_cancelled."""
+        from unified_brain.adapters.calendar import _normalize_calendar_event
+
+        event = _normalize_calendar_event(self._make_event(isCancelled=True))
+
+        self.assertEqual(event["event_type"], "meeting_cancelled")
+        self.assertIn("CANCELLED", event["body"])
+
+    def test_normalize_all_day_event(self):
+        """All-day events get event_type=all_day_event."""
+        from unified_brain.adapters.calendar import _normalize_calendar_event
+
+        event = _normalize_calendar_event(self._make_event(isAllDay=True))
+        self.assertEqual(event["event_type"], "all_day_event")
+
+    def test_normalize_online_meeting_url(self):
+        """Online meeting URL is in body and metadata."""
+        from unified_brain.adapters.calendar import _normalize_calendar_event
+
+        event = _normalize_calendar_event(self._make_event())
+
+        self.assertIn("teams.microsoft.com", event["body"])
+        self.assertEqual(event["metadata"]["online_url"],
+                         "https://teams.microsoft.com/meet/123")
+        self.assertTrue(event["metadata"]["is_online"])
+
+    def test_normalize_no_online(self):
+        """Non-online meetings don't include join URL."""
+        from unified_brain.adapters.calendar import _normalize_calendar_event
+
+        event = _normalize_calendar_event(self._make_event(
+            isOnlineMeeting=False, onlineMeeting=None,
+        ))
+
+        self.assertFalse(event["metadata"]["is_online"])
+        self.assertEqual(event["metadata"]["online_url"], "")
+
+    def test_normalize_id_format(self):
+        """Event ID uses cal: prefix."""
+        from unified_brain.adapters.calendar import _normalize_calendar_event
+
+        event = _normalize_calendar_event(self._make_event())
+        self.assertTrue(event["id"].startswith("cal:"))
+
+    def test_normalize_attendees_capped(self):
+        """Attendee list is capped at 20."""
+        from unified_brain.adapters.calendar import _normalize_calendar_event
+
+        many = [{"emailAddress": {"name": f"User{i}", "address": f"u{i}@x.com"},
+                 "status": {"response": "none"}} for i in range(30)]
+
+        event = _normalize_calendar_event(self._make_event(attendees=many))
+        self.assertEqual(len(event["metadata"]["attendees"]), 20)
+        self.assertEqual(event["metadata"]["attendee_count"], 30)
+
+    def test_adapter_poll_without_client_returns_empty(self):
+        """Poll returns empty list when client not initialized."""
+        from unified_brain.adapters.calendar import CalendarAdapter
+
+        adapter = CalendarAdapter({})
+        events = asyncio.run(adapter.poll())
+        self.assertEqual(events, [])
+
+    def test_adapter_source_property(self):
+        """Source property returns 'calendar'."""
+        from unified_brain.adapters.calendar import CalendarAdapter
+
+        adapter = CalendarAdapter({})
+        self.assertEqual(adapter.source, "calendar")
+
+    def test_adapter_config_defaults(self):
+        """Adapter uses sensible defaults."""
+        from unified_brain.adapters.calendar import CalendarAdapter
+
+        adapter = CalendarAdapter({})
+        self.assertEqual(adapter.lookahead_hours, 24)
+        self.assertEqual(adapter.events_per_poll, 50)
+
+    def test_adapter_custom_config(self):
+        """Adapter respects custom config."""
+        from unified_brain.adapters.calendar import CalendarAdapter
+
+        adapter = CalendarAdapter({"lookahead_hours": 48, "events_per_poll": 100})
+        self.assertEqual(adapter.lookahead_hours, 48)
+        self.assertEqual(adapter.events_per_poll, 100)
+
+
 if __name__ == "__main__":
     unittest.main()

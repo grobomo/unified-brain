@@ -44,8 +44,10 @@
 - [x] Tests (12)
 
 ## T069: Calendar adapter
-- [ ] MS Graph calendar poller
-- [ ] Normalize meetings/changes as events
+- [x] MS Graph calendarView poller with lookahead window
+- [x] Normalize meetings, cancellations, all-day events
+- [x] Attendee tracking (capped at 20), online meeting URLs
+- [x] Tests (11)
 
 ## T070-T072: Port ccc-manager patterns
 - [ ] T070: Worktree isolation (Python rewrite)
