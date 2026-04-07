@@ -5087,5 +5087,123 @@ class TestCCCBridge(unittest.TestCase):
             self.assertTrue(os.path.isdir(path), f"Missing: {subdir}")
 
 
+class TestCCCResultMonitor(unittest.TestCase):
+    """Tests for CCC result monitoring in BrainService (T065)."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.relay_dir = os.path.join(self.tmpdir, "relay")
+        self.db_path = os.path.join(self.tmpdir, "test.db")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_ccc_bridge_disabled_by_default(self):
+        """CCC bridge is None when not configured."""
+        from unified_brain.service import BrainService
+
+        service = BrainService({"db_path": self.db_path})
+        self.assertIsNone(service.ccc_bridge)
+        service.store.close()
+
+    def test_ccc_bridge_enabled_when_configured(self):
+        """CCC bridge is created when enabled in config."""
+        from unified_brain.service import BrainService
+
+        service = BrainService({
+            "db_path": self.db_path,
+            "ccc_bridge": {"enabled": True, "relay_dir": self.relay_dir},
+        })
+        self.assertIsNotNone(service.ccc_bridge)
+        service.store.close()
+
+    def test_ccc_results_recorded_in_feedback(self):
+        """Completed CCC results are recorded in feedback store."""
+        from unified_brain.service import BrainService
+        from unified_brain.ccc_bridge import CCCBridge
+
+        service = BrainService({
+            "db_path": self.db_path,
+            "ccc_bridge": {"enabled": True, "relay_dir": self.relay_dir},
+        })
+
+        # Write a completed result for CCC bridge to find
+        service.ccc_bridge._ensure_dirs()
+        result_file = os.path.join(
+            service.ccc_bridge._completed_dir, "task-001.json"
+        )
+        with open(result_file, "w") as f:
+            json.dump({
+                "id": "task-001",
+                "success": True,
+                "output": "PR created",
+                "worker": "worker-1",
+            }, f)
+
+        # Run one cycle
+        asyncio.run(service.run_cycle())
+
+        # Check feedback was recorded (ccc_work from bridge + dispatch from relay)
+        stats = service.feedback.summary(hours=1)
+        # At least one feedback entry exists
+        total_entries = sum(v.get("total", 0) for k, v in stats.items() if k != "recent_failures")
+        self.assertGreater(total_entries, 0)
+        service.store.close()
+
+    def test_ccc_failed_result_triggers_retry(self):
+        """Failed CCC results trigger re-dispatch when failure rate is low."""
+        from unified_brain.service import BrainService
+
+        service = BrainService({
+            "db_path": self.db_path,
+            "ccc_bridge": {"enabled": True, "relay_dir": self.relay_dir},
+        })
+
+        # Record some successes first to keep failure rate low
+        for i in range(5):
+            service.feedback.record(
+                task_id=f"prev-{i}", action="ccc_work",
+                success=True, source="ccc", channel="worker",
+            )
+
+        # Write a failed result
+        service.ccc_bridge._ensure_dirs()
+        result_file = os.path.join(
+            service.ccc_bridge._failed_dir, "task-fail.json"
+        )
+        with open(result_file, "w") as f:
+            json.dump({
+                "id": "task-fail",
+                "success": False,
+                "error": "Tests failed",
+            }, f)
+
+        asyncio.run(service.run_cycle())
+
+        # Should have a retry in pending
+        pending = service.ccc_bridge.get_pending_count()
+        self.assertGreater(pending, 0)
+        service.store.close()
+
+    def test_ccc_bridge_dispatch_from_focus_steal(self):
+        """Focus-steal dispatch action can be routed to CCC bridge."""
+        from unified_brain.ccc_bridge import CCCBridge
+
+        bridge = CCCBridge({"relay_dir": self.relay_dir})
+
+        # Simulate what focus_steal handler returns as a dispatch action
+        result = bridge.dispatch({
+            "id": "focus-fix-001",
+            "content": "Fix focus-steal in _grobomo/system-monitor",
+            "metadata": {
+                "source_project": "_grobomo/system-monitor",
+                "command": "python context_reset.py --project-dir /path",
+            },
+        })
+
+        self.assertEqual(result["status"], "dispatched")
+        self.assertEqual(bridge.get_pending_count(), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

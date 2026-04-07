@@ -20,6 +20,7 @@ from .metrics import (
     adapter_errors, brain_errors,
 )
 from .registry import ProjectRegistry
+from .ccc_bridge import CCCBridge
 from .focus_steal import handle_focus_steal
 from .loop_analyzer import LoopAnalyzer
 from .reflection import ReflectionTaskStore
@@ -44,6 +45,8 @@ class BrainService:
             memory=self.memory,
             hook_log_path=self.config.get("hook_log_path", ""),
         )
+        ccc_config = self.config.get("ccc_bridge", {})
+        self.ccc_bridge = CCCBridge(ccc_config) if ccc_config.get("enabled") else None
         self.context_builder = ContextBuilder(
             self.store, self.registry, self.config.get("context", {}),
             memory=self.memory, feedback=self.feedback,
@@ -159,6 +162,48 @@ class BrainService:
             task_id = result.get("id", "?")
             log.info(f"[result] Task {task_id}: {'success' if success else 'failed'}")
             self._relay_result(result)
+
+        # 3b. Check CCC bridge for completed worker tasks
+        if self.ccc_bridge:
+            try:
+                ccc_results = self.ccc_bridge.poll_results()
+                for result in ccc_results:
+                    task_id = result.get("id", "?")
+                    success = result.get("success", False)
+                    log.info(f"[ccc] Task {task_id}: {'success' if success else 'failed'}")
+
+                    # Record feedback for prediction/outcome tracking
+                    self.feedback.record(
+                        task_id=task_id,
+                        action="ccc_work",
+                        success=success,
+                        source="ccc",
+                        channel=result.get("worker", "unknown"),
+                        error=result.get("error", "") if not success else "",
+                    )
+
+                    # Re-dispatch on failure (up to max retries via feedback count)
+                    if not success:
+                        stats = self.feedback.summary(hours=24)
+                        ccc_stats = stats.get("ccc_work", {})
+                        total = ccc_stats.get("total", 0)
+                        failed = ccc_stats.get("failed", 0)
+                        failure_rate = failed / total if total > 0 else 0
+                        if failure_rate < 0.5:  # Only retry if not chronic failure
+                            log.info(f"[ccc] Re-dispatching failed task {task_id}")
+                            self.ccc_bridge.dispatch({
+                                "id": f"{task_id}-retry",
+                                "content": f"Retry: {result.get('error', 'unknown error')}",
+                                "metadata": {"retry_of": task_id},
+                            })
+                        else:
+                            log.warning(f"[ccc] High failure rate ({failure_rate:.0%}), "
+                                        f"not retrying {task_id}")
+
+                    # Relay result to originating channel if available
+                    self._relay_result(result)
+            except Exception as e:
+                log.error(f"[ccc] Result poll error: {e}")
 
         # 4. Check reflection monitoring tasks (closed-loop self-improvement)
         if self.reflection_monitor:
