@@ -149,5 +149,6 @@ PRs #1-32 merged/open. 52 tasks done (T001-T052), spec 006 complete.
 - Deployment artifacts: Dockerfile, K8s manifests (kustomize), CloudFormation (EC2 spot + SQS)
 - PR #32 open: T049-T052 (interactive chat, personas, LLM logging, adapter filtering)
 - PR #32 open: T049-T052 (interactive chat, personas, LLM logging, adapter filtering)
-- T053 done on branch 033-T053-hook-runner-adapter, pushed, needs PR
-- Next: T054 (reflection analysis action), T055 (reflection bridge)
+- Branch 033-T053-hook-runner-adapter: T053 done + spec 007 v2 (closed-loop self-improvement), needs PR
+- Next: T054 (ReflectionTask lifecycle), then T055 (implementer), T056 (brain-owned score)
+- Spec 007 redesigned: brain predicts outcome before changes, prediction accuracy = primary score (70%)
