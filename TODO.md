@@ -194,6 +194,9 @@ Interactive: SSH chat, /ask endpoint     No UI: headless execution only
 - [ ] T067: Idle loop — brain runs periodic tasks between event cycles: compact memory, check dispatched work, run self-reflection, surface proactive insights ("daydreaming")
 - [ ] T068: Email adapter — MS Graph inbox poller (like Teams adapter), ingests emails as events. Uses msgraph-lib shared tokens.
 - [ ] T069: Calendar adapter — MS Graph calendar poller, ingests upcoming meetings/changes as events.
+- [ ] T070: Port worktree isolation — avoid git conflicts when multiple CCC workers touch same repo. Rewrite in Python for brain's dispatcher. Prevents concurrent edits to same files.
+- [ ] T071: Port write-set validation — auto-serialize tasks with overlapping file targets. Rewrite in Python.
+- [ ] T072: Port fleet heartbeat — peer discovery, stale worker pruning. Rewrite in Python for brain's worker monitoring.
 
 ## Session Handoff
 PRs #1-35 open/merged. 59 tasks done (T001-T059). Spec 008 written.
