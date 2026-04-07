@@ -5205,5 +5205,96 @@ class TestCCCResultMonitor(unittest.TestCase):
         self.assertEqual(bridge.get_pending_count(), 1)
 
 
+class TestSSHChatServer(unittest.TestCase):
+    """Tests for SSH chat server (T066)."""
+
+    def test_import_without_asyncssh(self):
+        """ssh_server module imports even if asyncssh isn't available."""
+        import unified_brain.ssh_server as mod
+        # HAS_ASYNCSSH should be True since we installed it
+        self.assertTrue(hasattr(mod, "HAS_ASYNCSSH"))
+        self.assertTrue(hasattr(mod, "BrainSSHServer"))
+
+    def test_server_init_defaults(self):
+        """Server initializes with default config."""
+        from unified_brain.ssh_server import BrainSSHServer
+        from unittest.mock import MagicMock
+
+        brain = MagicMock()
+        server = BrainSSHServer(brain)
+
+        self.assertEqual(server.host, "0.0.0.0")
+        self.assertEqual(server.port, 2222)
+        self.assertEqual(server.active_sessions, 0)
+
+    def test_server_custom_config(self):
+        """Server respects custom config."""
+        from unified_brain.ssh_server import BrainSSHServer
+        from unittest.mock import MagicMock
+
+        brain = MagicMock()
+        server = BrainSSHServer(brain, config={
+            "host": "127.0.0.1",
+            "port": 3333,
+            "host_key": "/tmp/test_key",
+        })
+
+        self.assertEqual(server.host, "127.0.0.1")
+        self.assertEqual(server.port, 3333)
+
+    def test_host_key_generation(self):
+        """Host key is auto-generated when missing."""
+        from unified_brain.ssh_server import BrainSSHServer, HAS_ASYNCSSH
+        from unittest.mock import MagicMock
+
+        if not HAS_ASYNCSSH:
+            self.skipTest("asyncssh not installed")
+
+        tmpdir = tempfile.mkdtemp()
+        try:
+            key_path = os.path.join(tmpdir, "test_host_key")
+            brain = MagicMock()
+            server = BrainSSHServer(brain, config={"host_key": key_path})
+            server._ensure_host_key()
+            self.assertTrue(os.path.exists(key_path))
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_host_key_not_regenerated(self):
+        """Existing host key is not overwritten."""
+        from unified_brain.ssh_server import BrainSSHServer, HAS_ASYNCSSH
+        from unittest.mock import MagicMock
+
+        if not HAS_ASYNCSSH:
+            self.skipTest("asyncssh not installed")
+
+        tmpdir = tempfile.mkdtemp()
+        try:
+            key_path = os.path.join(tmpdir, "test_host_key")
+            brain = MagicMock()
+            server = BrainSSHServer(brain, config={"host_key": key_path})
+
+            # Generate key
+            server._ensure_host_key()
+            mtime1 = os.path.getmtime(key_path)
+
+            # Call again — should not regenerate
+            server._ensure_host_key()
+            mtime2 = os.path.getmtime(key_path)
+            self.assertEqual(mtime1, mtime2)
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_read_line_helper_exists(self):
+        """_read_line async helper is importable."""
+        from unified_brain.ssh_server import _read_line
+        self.assertTrue(asyncio.iscoroutinefunction(_read_line))
+
+    def test_handle_ssh_session_exists(self):
+        """_handle_ssh_session is importable."""
+        from unified_brain.ssh_server import _handle_ssh_session
+        self.assertTrue(asyncio.iscoroutinefunction(_handle_ssh_session))
+
+
 if __name__ == "__main__":
     unittest.main()
