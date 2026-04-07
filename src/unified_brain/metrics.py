@@ -149,3 +149,15 @@ adapter_errors = registry.register(
 brain_errors = registry.register(
     Counter("brain_processing_errors_total", "Brain processing errors")
 )
+
+llm_calls_total = registry.register(
+    Counter("brain_llm_calls_total", "Total LLM calls by backend and outcome")
+)
+
+llm_active = registry.register(
+    Gauge("brain_llm_active_calls", "Currently running LLM calls")
+)
+
+llm_duration = registry.register(
+    Gauge("brain_llm_last_duration_seconds", "Duration of last LLM call by backend")
+)
