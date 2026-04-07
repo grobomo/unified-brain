@@ -5,6 +5,7 @@
 #   ./scripts/brain-curl.sh health        # check health/heartbeat
 #   ./scripts/brain-curl.sh metrics       # Prometheus metrics
 #   ./scripts/brain-curl.sh stats         # webhook queue stats
+#   ./scripts/brain-curl.sh ask <question> # ask the brain a question (sync)
 #   ./scripts/brain-curl.sh send <json>   # send event to webhook endpoint
 #   ./scripts/brain-curl.sh send-file <f> # send event from JSON file
 
@@ -21,6 +22,16 @@ case "${1:-health}" in
     ;;
   stats)
     curl -s "http://${HOST}:${WEBHOOK_PORT}/events/stats" | python -m json.tool 2>/dev/null || curl -s "http://${HOST}:${WEBHOOK_PORT}/events/stats"
+    ;;
+  ask)
+    shift
+    if [ -z "$1" ]; then
+      echo "Usage: brain-curl.sh ask 'What issues are open in repo X?'"
+      exit 1
+    fi
+    curl -s -X POST "http://${HOST}:${HEALTH_PORT}/ask" \
+      -H "Content-Type: application/json" \
+      -d "{\"question\": \"$1\"}" | python -m json.tool 2>/dev/null
     ;;
   send)
     shift
@@ -43,7 +54,7 @@ case "${1:-health}" in
       -d @"$1" | python -m json.tool 2>/dev/null
     ;;
   *)
-    echo "Usage: brain-curl.sh {health|metrics|stats|send <json>|send-file <file>}"
+    echo "Usage: brain-curl.sh {health|metrics|stats|ask <question>|send <json>|send-file <file>}"
     exit 1
     ;;
 esac

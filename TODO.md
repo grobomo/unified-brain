@@ -115,13 +115,12 @@ Brain is the constant. Adapters, LLM backend, dispatchers are pluggable per envi
 - [x] T048: Synchronous /ask endpoint — POST question, get brain analysis back as HTTP response (conversational mode)
 
 ## Session Handoff
-PRs #1-27 merged. CI green. 43 tasks done (T001-T043), all phases complete.
+PRs #1-27 merged. Phase 12 in progress on branch 029-T048-ask-endpoint.
+- 48 tasks done (T001-T048), 117 tests passing, zero external deps for core
 - SERVICE IS LIVE locally: interval=3s, health on :8790, all adapters connected
-- Architecture: pluggable adapters (GitHub, Teams, Webhook), LLM backend (subprocess/api), dispatcher transport (file/SQS), active respond
-- 601+ events in store, 111 tests passing, zero external deps for core
-- 4 adapters: GitHub, Teams, Slack, Webhook (rate-limited)
-- Prometheus metrics: /metrics endpoint, 10 metric series, Grafana dashboard
-- Feedback loop: tracks dispatch/respond outcomes, feeds success/failure patterns to brain
-- Webhook adapter: HTTP POST /events, /events/raw (GitHub webhooks), HMAC verification
-- Docker Compose: one-command startup with brain + Prometheus + Grafana
-- Deployment artifacts: Dockerfile, K8s manifests (kustomize), CloudFormation (EC2 spot + SQS)
+- 4 adapters: GitHub, Teams, Slack (new), Webhook (rate-limited)
+- /ask endpoint: POST question → brain analysis response (conversational API)
+- brain-curl.sh helper: health, metrics, stats, ask, send, send-file
+- SQLite check_same_thread=False for cross-thread /ask access
+- Prometheus metrics, Grafana dashboard, feedback loop, active respond
+- Deployment artifacts: Dockerfile, K8s manifests, CloudFormation, Docker Compose
