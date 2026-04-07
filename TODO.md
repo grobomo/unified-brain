@@ -192,7 +192,7 @@ Interactive: SSH chat, /ask endpoint     No UI: headless execution only
 - [x] T065: CCC result monitor — brain polls CCCBridge for completed tasks, records feedback, retries on failure (with chronic failure guard), relays results to originating channel. 5 tests.
 - [x] T066: SSH chat server — asyncssh server in brain, drops users into chat REPL via `ssh brain@rone-host -p 2222`. Auto-generated host key, optional authorized_keys, PTY line editing. 7 tests.
 - [x] T067: Idle loop — IdleTask + IdleLoop with per-task intervals, create_idle_loop factory wires memory compaction, CCC check, reflection, proactive insights. 10 tests.
-- [ ] T068: Email adapter — MS Graph inbox poller (like Teams adapter), ingests emails as events. Uses msgraph-lib shared tokens.
+- [x] T068: Email adapter — MS Graph inbox poller, HTML body stripping, folder/filter config, BoundedSet dedup. 12 tests.
 - [ ] T069: Calendar adapter — MS Graph calendar poller, ingests upcoming meetings/changes as events.
 - [ ] T070: Port worktree isolation — avoid git conflicts when multiple CCC workers touch same repo. Rewrite in Python for brain's dispatcher. Prevents concurrent edits to same files.
 - [ ] T071: Port write-set validation — auto-serialize tasks with overlapping file targets. Rewrite in Python.

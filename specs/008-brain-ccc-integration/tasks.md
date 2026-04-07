@@ -37,8 +37,11 @@
 - [x] Tests (10)
 
 ## T068: Email adapter
-- [ ] MS Graph inbox poller
-- [ ] Normalize emails as events
+- [x] MS Graph inbox poller via _GraphClient
+- [x] HTML body stripping, folder/filter config
+- [x] Normalize emails as events (subject, sender, recipients, importance)
+- [x] BoundedSet dedup
+- [x] Tests (12)
 
 ## T069: Calendar adapter
 - [ ] MS Graph calendar poller

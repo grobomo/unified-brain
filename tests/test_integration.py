@@ -5446,5 +5446,162 @@ class TestIdleLoop(unittest.TestCase):
             shutil.rmtree(tmpdir, ignore_errors=True)
 
 
+class TestEmailAdapter(unittest.TestCase):
+    """Tests for email channel adapter (T068)."""
+
+    def _make_msg(self, **overrides):
+        base = {
+            "id": "msg-001",
+            "subject": "CI failure on hook-runner",
+            "from": {
+                "emailAddress": {
+                    "name": "GitHub",
+                    "address": "noreply@github.com",
+                },
+            },
+            "toRecipients": [
+                {"emailAddress": {"address": "user@example.com"}},
+            ],
+            "ccRecipients": [],
+            "body": {"contentType": "text", "content": "Tests failed on main branch."},
+            "receivedDateTime": "2026-04-07T10:00:00Z",
+            "isRead": False,
+            "importance": "normal",
+            "hasAttachments": False,
+        }
+        base.update(overrides)
+        return base
+
+    def test_normalize_email_basic(self):
+        """Email normalizes to brain event with correct fields."""
+        from unified_brain.adapters.email import _normalize_email
+
+        msg = self._make_msg()
+        event = _normalize_email(msg, "inbox")
+
+        self.assertEqual(event["source"], "email")
+        self.assertEqual(event["channel"], "inbox")
+        self.assertEqual(event["event_type"], "email")
+        self.assertEqual(event["author"], "GitHub")
+        self.assertEqual(event["title"], "CI failure on hook-runner")
+        self.assertIn("Tests failed", event["body"])
+        self.assertEqual(event["metadata"]["sender_email"], "noreply@github.com")
+        self.assertFalse(event["metadata"]["is_read"])
+
+    def test_normalize_email_html_body(self):
+        """HTML body is stripped to plain text."""
+        from unified_brain.adapters.email import _normalize_email
+
+        msg = self._make_msg(body={
+            "contentType": "html",
+            "content": "<html><body><p>Hello <b>world</b></p><style>.x{}</style></body></html>",
+        })
+        event = _normalize_email(msg, "inbox")
+
+        self.assertNotIn("<", event["body"])
+        self.assertIn("Hello", event["body"])
+        self.assertIn("world", event["body"])
+        self.assertNotIn(".x{}", event["body"])
+
+    def test_normalize_email_id_format(self):
+        """Event ID uses email: prefix with truncated message ID."""
+        from unified_brain.adapters.email import _normalize_email
+
+        msg = self._make_msg(id="a" * 100)
+        event = _normalize_email(msg, "inbox")
+
+        self.assertTrue(event["id"].startswith("email:"))
+        self.assertLessEqual(len(event["id"]), 50)
+
+    def test_normalize_email_recipients(self):
+        """To and CC recipients are preserved in metadata."""
+        from unified_brain.adapters.email import _normalize_email
+
+        msg = self._make_msg(
+            toRecipients=[
+                {"emailAddress": {"address": "a@example.com"}},
+                {"emailAddress": {"address": "b@example.com"}},
+            ],
+            ccRecipients=[
+                {"emailAddress": {"address": "c@example.com"}},
+            ],
+        )
+        event = _normalize_email(msg, "inbox")
+
+        self.assertEqual(len(event["metadata"]["to"]), 2)
+        self.assertEqual(len(event["metadata"]["cc"]), 1)
+
+    def test_normalize_email_importance(self):
+        """High importance is preserved."""
+        from unified_brain.adapters.email import _normalize_email
+
+        msg = self._make_msg(importance="high")
+        event = _normalize_email(msg, "inbox")
+
+        self.assertEqual(event["metadata"]["importance"], "high")
+
+    def test_extract_text_plain(self):
+        """Plain text body is returned as-is."""
+        from unified_brain.adapters.email import _extract_text
+
+        text = _extract_text({"contentType": "text", "content": "Hello world"})
+        self.assertEqual(text, "Hello world")
+
+    def test_extract_text_html(self):
+        """HTML body is stripped of tags."""
+        from unified_brain.adapters.email import _extract_text
+
+        text = _extract_text({
+            "contentType": "html",
+            "content": "<div>Hello <b>world</b></div>",
+        })
+        self.assertIn("Hello", text)
+        self.assertIn("world", text)
+        self.assertNotIn("<", text)
+
+    def test_extract_text_truncates(self):
+        """Body is truncated at 5000 chars."""
+        from unified_brain.adapters.email import _extract_text
+
+        text = _extract_text({"contentType": "text", "content": "x" * 10000})
+        self.assertEqual(len(text), 5000)
+
+    def test_adapter_poll_without_client_returns_empty(self):
+        """Poll returns empty list when client not initialized."""
+        from unified_brain.adapters.email import EmailAdapter
+
+        adapter = EmailAdapter({})
+        events = asyncio.run(adapter.poll())
+        self.assertEqual(events, [])
+
+    def test_adapter_source_property(self):
+        """Source property returns 'email'."""
+        from unified_brain.adapters.email import EmailAdapter
+
+        adapter = EmailAdapter({})
+        self.assertEqual(adapter.source, "email")
+
+    def test_adapter_config_defaults(self):
+        """Adapter uses sensible defaults."""
+        from unified_brain.adapters.email import EmailAdapter
+
+        adapter = EmailAdapter({})
+        self.assertEqual(adapter.folder, "inbox")
+        self.assertEqual(adapter.poll_count, 20)
+
+    def test_adapter_custom_config(self):
+        """Adapter respects custom config."""
+        from unified_brain.adapters.email import EmailAdapter
+
+        adapter = EmailAdapter({
+            "folder": "sentitems",
+            "messages_per_poll": 50,
+            "filter": "isRead eq false",
+        })
+        self.assertEqual(adapter.folder, "sentitems")
+        self.assertEqual(adapter.poll_count, 50)
+        self.assertEqual(adapter.filter, "isRead eq false")
+
+
 if __name__ == "__main__":
     unittest.main()
