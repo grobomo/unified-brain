@@ -113,15 +113,25 @@ Brain is the constant. Adapters, LLM backend, dispatchers are pluggable per envi
 - [x] T046: Webhook rate limiting — token bucket per IP, configurable burst/rate, 429 responses
 - [x] T047: Update docs — README and TODO reflect Slack adapter, rate limiting, test count
 - [x] T048: Synchronous /ask endpoint — POST question, get brain analysis back as HTTP response (conversational mode)
+- [ ] T049: Interactive chat mode — persistent brain session with conversation history, CLI REPL + WebSocket endpoint
+- [ ] T050: Persona system — per-user brain identity (name + emoji), self-message filtering
+- [ ] T051: LLM call logging and metrics — JSONL audit trail, Prometheus counters, concurrency gauge
+- [ ] T052: Adapter self-message filtering — skip brain's own messages in Teams/Slack/GitHub
+
+## Phase 13: Self-Reflection Plugin
+- [ ] T053: Hook-runner self-reflection adapter — channel adapter that ingests hook-log.jsonl and self-reflection.jsonl as events. Brain's three-tier memory gives persistent context across sessions. Self-reflection becomes a brain channel instead of standalone claude -p calls.
+- [ ] T054: Reflection analysis action — brain analyzes hook events with full memory context (past sessions, recurring patterns, correction history), returns structured findings. Replaces self-reflection.js's direct claude -p call.
+- [ ] T055: Reflection bridge — hook-runner writes events to bridge dir, brain analyzes, writes findings back. Hook-runner reads findings and enforces via reflection-gate. Clean separation: brain thinks, hook-runner enforces.
 
 ## Session Handoff
-PRs #1-27 merged. CI green. 43 tasks done (T001-T043), all phases complete.
+PRs #1-31 merged. CI green. 48 tasks done (T001-T048), all phases complete.
 - SERVICE IS LIVE locally: interval=3s, health on :8790, all adapters connected
-- Architecture: pluggable adapters (GitHub, Teams, Webhook), LLM backend (subprocess/api), dispatcher transport (file/SQS), active respond
-- 601+ events in store, 111 tests passing, zero external deps for core
-- 4 adapters: GitHub, Teams, Slack, Webhook (rate-limited)
+- Architecture: pluggable adapters (GitHub, Teams, Slack, Webhook), LLM backend (subprocess/api), dispatcher transport (file/SQS), active respond
+- 601+ events in store, 117 tests passing, zero external deps for core
+- 4 adapters: GitHub (gh CLI), Teams (MS Graph), Slack (Web API), Webhook (HTTP POST, rate-limited)
+- /ask endpoint: POST question → synchronous brain analysis response (conversational mode)
 - Prometheus metrics: /metrics endpoint, 10 metric series, Grafana dashboard
 - Feedback loop: tracks dispatch/respond outcomes, feeds success/failure patterns to brain
-- Webhook adapter: HTTP POST /events, /events/raw (GitHub webhooks), HMAC verification
 - Docker Compose: one-command startup with brain + Prometheus + Grafana
 - Deployment artifacts: Dockerfile, K8s manifests (kustomize), CloudFormation (EC2 spot + SQS)
+- Next opportunities: brain prompt A/B testing, event replay/backfill tool, Discord adapter, admin dashboard
