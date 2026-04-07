@@ -2865,5 +2865,173 @@ class TestChannelSessions(unittest.TestCase):
         self.assertEqual(len(s_kush.history), 6)    # 3 turns
 
 
+class TestAdapterSelfMessageFiltering(unittest.TestCase):
+    """Tests for adapter self-message filtering via persona registry (T052)."""
+
+    def test_teams_adapter_skips_own_messages(self):
+        """Teams adapter filters out messages starting with persona emoji."""
+        from unittest import mock
+        from unified_brain.adapters.teams import TeamsAdapter
+        from unified_brain.persona import PersonaRegistry
+
+        persona_reg = PersonaRegistry({"users": {"joel": {"emoji": "🧠"}}})
+        adapter = TeamsAdapter({"chat_ids": ["chat1"]}, persona_registry=persona_reg)
+        adapter._seen_ids = BoundedSet()
+
+        # Mock the Graph client to return messages
+        mock_client = mock.MagicMock()
+        mock_client.get.return_value = {
+            "value": [
+                {
+                    "id": "msg1",
+                    "body": {"content": "🧠 Brain analysis complete"},
+                    "from": {"user": {"displayName": "Joel", "id": "u1"}},
+                    "createdDateTime": "2026-04-06T20:00:00Z",
+                },
+                {
+                    "id": "msg2",
+                    "body": {"content": "Hey team, what's the status?"},
+                    "from": {"user": {"displayName": "Kush", "id": "u2"}},
+                    "createdDateTime": "2026-04-06T20:01:00Z",
+                },
+            ]
+        }
+        adapter._client = mock_client
+
+        events = asyncio.run(adapter.poll())
+        # Only msg2 should come through (msg1 is the brain's own message)
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["author"], "Kush")
+
+    def test_teams_adapter_without_persona_passes_all(self):
+        """Without persona registry, all messages pass through."""
+        from unittest import mock
+        from unified_brain.adapters.teams import TeamsAdapter
+
+        adapter = TeamsAdapter({"chat_ids": ["chat1"]}, persona_registry=None)
+        adapter._seen_ids = BoundedSet()
+
+        mock_client = mock.MagicMock()
+        mock_client.get.return_value = {
+            "value": [
+                {
+                    "id": "msg1",
+                    "body": {"content": "🧠 Brain message"},
+                    "from": {"user": {"displayName": "Joel", "id": "u1"}},
+                    "createdDateTime": "2026-04-06T20:00:00Z",
+                },
+            ]
+        }
+        adapter._client = mock_client
+
+        events = asyncio.run(adapter.poll())
+        self.assertEqual(len(events), 1)
+
+    def test_slack_adapter_skips_bot_user_id(self):
+        """Slack adapter filters out messages from its own bot user ID."""
+        from unittest import mock
+        from unified_brain.adapters.slack import SlackAdapter
+
+        adapter = SlackAdapter({"channel_ids": ["C123"]})
+        adapter._seen_ids = BoundedSet()
+        adapter._bot_user_id = "U_BOT"
+
+        mock_client = mock.MagicMock()
+        mock_client.get.return_value = {
+            "ok": True,
+            "messages": [
+                {"ts": "100.001", "user": "U_BOT", "text": "🧠 auto response"},
+                {"ts": "100.002", "user": "U_HUMAN", "text": "real question"},
+            ],
+        }
+        adapter._client = mock_client
+
+        events = asyncio.run(adapter.poll())
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["author"], "U_HUMAN")
+
+    def test_slack_adapter_skips_persona_emoji(self):
+        """Slack adapter filters by persona emoji when bot_user_id doesn't match."""
+        from unittest import mock
+        from unified_brain.adapters.slack import SlackAdapter
+        from unified_brain.persona import PersonaRegistry
+
+        persona_reg = PersonaRegistry({"users": {"kush": {"emoji": "🥭"}}})
+        adapter = SlackAdapter({"channel_ids": ["C123"]}, persona_registry=persona_reg)
+        adapter._seen_ids = BoundedSet()
+        adapter._bot_user_id = ""  # No bot user ID
+
+        mock_client = mock.MagicMock()
+        mock_client.get.return_value = {
+            "ok": True,
+            "messages": [
+                {"ts": "100.001", "user": "U1", "text": "🥭 Mango says hi"},
+                {"ts": "100.002", "user": "U2", "text": "Normal message"},
+            ],
+        }
+        adapter._client = mock_client
+
+        events = asyncio.run(adapter.poll())
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["body"], "Normal message")
+
+    def test_github_adapter_skips_bot_login(self):
+        """GitHub adapter filters events from the brain's bot_login."""
+        from unittest import mock
+        from unified_brain.adapters.github import GitHubAdapter
+
+        adapter = GitHubAdapter({
+            "repos": ["grobomo/unified-brain"],
+            "bot_login": "grobomo-bot",
+        })
+        adapter._seen_ids = BoundedSet()
+
+        events_data = [
+            {
+                "id": "1",
+                "type": "PushEvent",
+                "actor": {"login": "grobomo-bot"},
+                "payload": {"commits": [{"message": "auto fix"}]},
+                "created_at": "2026-04-06T20:00:00Z",
+            },
+            {
+                "id": "2",
+                "type": "PushEvent",
+                "actor": {"login": "developer"},
+                "payload": {"commits": [{"message": "real commit"}]},
+                "created_at": "2026-04-06T20:01:00Z",
+            },
+        ]
+
+        with mock.patch("unified_brain.adapters.github._gh_api", return_value=events_data):
+            events = adapter._poll_events("grobomo/unified-brain")
+
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["author"], "developer")
+
+    def test_github_adapter_without_bot_login_passes_all(self):
+        """Without bot_login configured, all events pass through."""
+        from unittest import mock
+        from unified_brain.adapters.github import GitHubAdapter
+
+        adapter = GitHubAdapter({"repos": ["grobomo/test"]})
+        adapter._seen_ids = BoundedSet()
+
+        events_data = [
+            {
+                "id": "1",
+                "type": "PushEvent",
+                "actor": {"login": "anyone"},
+                "payload": {"commits": [{"message": "commit"}]},
+                "created_at": "2026-04-06T20:00:00Z",
+            },
+        ]
+
+        with mock.patch("unified_brain.adapters.github._gh_api", return_value=events_data):
+            events = adapter._poll_events("grobomo/test")
+
+        self.assertEqual(len(events), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

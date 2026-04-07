@@ -296,17 +296,17 @@ async def run_service(config: dict, once: bool = False,
     )
     _HealthHandler.chat_sessions = chat_sessions
 
-    # Register adapters based on config
+    # Register adapters based on config (persona_registry for self-message filtering)
     adapters_config = config.get("adapters", {})
     if adapters_config.get("github", {}).get("enabled", False):
         gh_config = adapters_config["github"]
-        service.add_adapter(GitHubAdapter(gh_config))
+        service.add_adapter(GitHubAdapter(gh_config, persona_registry=persona_registry))
     if adapters_config.get("teams", {}).get("enabled", False):
         teams_config = adapters_config["teams"]
-        service.add_adapter(TeamsAdapter(teams_config))
+        service.add_adapter(TeamsAdapter(teams_config, persona_registry=persona_registry))
     if adapters_config.get("slack", {}).get("enabled", False):
         slack_config = adapters_config["slack"]
-        service.add_adapter(SlackAdapter(slack_config))
+        service.add_adapter(SlackAdapter(slack_config, persona_registry=persona_registry))
     if adapters_config.get("webhook", {}).get("enabled", False):
         wh_config = adapters_config["webhook"]
         service.add_adapter(WebhookAdapter(

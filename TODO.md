@@ -113,10 +113,10 @@ Brain is the constant. Adapters, LLM backend, dispatchers are pluggable per envi
 - [x] T046: Webhook rate limiting — token bucket per IP, configurable burst/rate, 429 responses
 - [x] T047: Update docs — README and TODO reflect Slack adapter, rate limiting, test count
 - [x] T048: Synchronous /ask endpoint — POST question, get brain analysis back as HTTP response (conversational mode)
-- [ ] T049: Interactive chat mode — persistent brain session with conversation history, CLI REPL + WebSocket endpoint
-- [ ] T050: Persona system — per-user brain identity (name + emoji), self-message filtering
-- [ ] T051: LLM call logging and metrics — JSONL audit trail, Prometheus counters, concurrency gauge
-- [ ] T052: Adapter self-message filtering — skip brain's own messages in Teams/Slack/GitHub
+- [x] T049: Interactive chat mode — persistent brain session with conversation history, CLI REPL + WebSocket endpoint
+- [x] T050: Persona system — per-user brain identity (name + emoji), self-message filtering
+- [x] T051: LLM call logging and metrics — JSONL audit trail, Prometheus counters, concurrency gauge
+- [x] T052: Adapter self-message filtering — skip brain's own messages in Teams/Slack/GitHub
 
 ## Phase 13: Self-Reflection Plugin
 Source: `_grobomo/hook-runner` (v2.10.0) — T331 in hook-runner/TODO.md depends on these.

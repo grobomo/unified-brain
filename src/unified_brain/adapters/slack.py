@@ -79,12 +79,14 @@ class _SlackClient:
 class SlackAdapter(ChannelAdapter):
     """Polls Slack channels via Web API and yields normalized events."""
 
-    def __init__(self, config: dict = None):
+    def __init__(self, config: dict = None, persona_registry=None):
         super().__init__("slack", config)
         self.channel_ids = self.config.get("channel_ids", [])
         self.poll_count = self.config.get("messages_per_poll", 20)
         self._client = None
         self._seen_ids = BoundedSet()
+        self._persona_registry = persona_registry
+        self._bot_user_id = None  # Set during start() from auth.test
         # Track latest timestamp per channel for incremental polling
         self._channel_cursors: dict[str, str] = {}
 
@@ -105,7 +107,8 @@ class SlackAdapter(ChannelAdapter):
         if result.get("ok"):
             bot_name = result.get("user", "unknown")
             team = result.get("team", "unknown")
-            logger.info(f"Slack adapter started as @{bot_name} in {team}, "
+            self._bot_user_id = result.get("user_id", "")
+            logger.info(f"Slack adapter started as @{bot_name} ({self._bot_user_id}) in {team}, "
                         f"watching {len(self.channel_ids)} channels")
         else:
             logger.error(f"Slack auth failed: {result.get('error', 'unknown')}")
@@ -146,8 +149,19 @@ class SlackAdapter(ChannelAdapter):
                     if not ts or ts in self._seen_ids:
                         continue
 
+                    # Skip messages from the bot itself
+                    user_id = msg.get("user", "unknown")
+                    if self._bot_user_id and user_id == self._bot_user_id:
+                        self._seen_ids.add(ts)
+                        continue
+
                     text = msg.get("text", "").strip()
                     if not text:
+                        continue
+
+                    # Skip brain's own messages (identified by persona emoji prefix)
+                    if self._persona_registry and self._persona_registry.is_own_message(text):
+                        self._seen_ids.add(ts)
                         continue
 
                     self._seen_ids.add(ts)
@@ -156,7 +170,6 @@ class SlackAdapter(ChannelAdapter):
                     if ts > newest_ts:
                         newest_ts = ts
 
-                    user_id = msg.get("user", "unknown")
                     events.append({
                         "id": f"slack:{channel_id}:{ts}",
                         "source": "slack",

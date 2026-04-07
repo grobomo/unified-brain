@@ -28,8 +28,8 @@
 - [x] T051f: Tests for LLM logging (6 tests: JSONL write, truncation, None response, metrics registered, metrics updated, subprocess instrumented)
 
 ## T052: Adapter self-message filtering
-- [ ] T052a: PersonaRegistry passed to adapters
-- [ ] T052b: Teams adapter skip own messages
-- [ ] T052c: Slack adapter skip own messages
-- [ ] T052d: GitHub adapter skip bot comments
-- [ ] T052e: Tests for filtering
+- [x] T052a: PersonaRegistry passed to adapters
+- [x] T052b: Teams adapter skip own messages
+- [x] T052c: Slack adapter skip own messages
+- [x] T052d: GitHub adapter skip bot comments
+- [x] T052e: Tests for filtering (6 tests)
