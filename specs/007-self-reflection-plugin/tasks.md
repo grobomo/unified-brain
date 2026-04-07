@@ -27,12 +27,12 @@
 - [x] T055e: Wire into service loop — ReflectionMonitor in run_cycle, runner wiring
 - [x] T055f: Tests (21 tests: file edit, backup, rollback, monitoring, prompt enrichment)
 
-## T056: Brain-owned score + bridge
-- [ ] T056a: BrainScore — prediction accuracy (0.7 weight) + user interrupt rate (0.3 weight)
-- [ ] T056b: Score poller — reads reflection-score.json for user-interrupt baseline
-- [ ] T056c: Rolling prediction accuracy tracker (last 10 predictions)
-- [ ] T056d: Score persistence (brain-score.json in data/)
-- [ ] T056e: Prometheus metrics for brain score (accuracy gauge, score gauge, prediction count)
-- [ ] T056f: reflection-findings.json writer (active tasks, findings, score breakdown)
-- [ ] T056g: End-to-end test: detect → predict → implement → monitor → verify → close
-- [ ] T056h: End-to-end test: predict wrong → score drops → rollback → re-analyze → predict again
+## T056: Brain-owned score + bridge (DONE)
+- [x] T056a: BrainScore — prediction accuracy (0.7 weight) + user interrupt rate (0.3 weight)
+- [x] T056b: Score poller — reads reflection-score.json for user-interrupt baseline
+- [x] T056c: Rolling prediction accuracy tracker (last 10 predictions, deque window)
+- [x] T056d: Score persistence (brain-score.json in data/)
+- [x] T056e: Prometheus metrics for brain score (accuracy gauge, score gauge, prediction count)
+- [x] T056f: reflection-findings.json writer (active tasks, findings, score breakdown)
+- [x] T056g: End-to-end test: detect → predict → implement → monitor (5 checkpoints) → verify → close
+- [x] T056h: End-to-end test: predict wrong → score drops → rollback → re-analyze → succeed + max attempts exhausted

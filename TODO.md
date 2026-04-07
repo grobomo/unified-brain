@@ -134,12 +134,13 @@ Data files (all in `~/.claude/hooks/`):
 - [x] T053: Hook-runner channel adapter — ingests hook-log.jsonl + self-reflection.jsonl as events
 - [x] T054: ReflectionTask lifecycle — state machine (detect → predict → implement → monitor → verify → close), exponential backoff (30s→30m), rollback on prediction mismatch, max 3 attempts
 - [x] T055: Reflection implementer — file backup/edit/rollback for hook modules, brain prompt enrichment with prediction history, per-module calibration in Tier 2 memory
-- [ ] T056: Brain-owned score — prediction accuracy (70%) + user interrupt rate (30%), rolling tracker, score persistence, Prometheus metrics, reflection-findings.json bridge
+- [x] T056: Brain-owned score — prediction accuracy (70%) + user interrupt rate (30%), rolling tracker, score persistence, Prometheus metrics, reflection-findings.json bridge
 
 ## Session Handoff
-PRs #1-32 merged/open. 55 tasks done (T001-T055), spec 007 in progress.
-- 236 tests passing, zero external deps for core
-- Branch 034-T055-reflection-implementer: T054 + T055 done
-- T054: reflection.py — ReflectionTask data model, state machine, Prediction, ReflectionTaskStore (SQLite), 32 tests
-- T055: implementer.py — FileEditor (backup/edit/rollback), ReflectionMonitor (checkpoint eval, backoff), prompt enrichment, service loop wiring, 21 tests
-- Next: T056 (brain-owned score — prediction accuracy tracker, Prometheus metrics, reflection-findings.json bridge)
+PRs #1-32 merged/open. 56 tasks done (T001-T056), spec 007 complete.
+- 252 tests passing, zero external deps for core
+- Branch 034-T055-reflection-implementer: T054-T056 done (spec 007 complete)
+- T054: reflection.py — ReflectionTask state machine, Prediction, ReflectionTaskStore (SQLite)
+- T055: implementer.py — FileEditor, ReflectionMonitor, prompt enrichment, service loop wiring
+- T056: score.py — BrainScore (prediction accuracy 70% + interrupt rate 30%), reflection-findings.json bridge, 3 Prometheus metrics, 2 E2E tests
+- Spec 007 closed-loop self-improvement is fully implemented. Next: PR, merge, then new spec or operational work.

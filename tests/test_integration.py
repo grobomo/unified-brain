@@ -3788,5 +3788,361 @@ class TestReflectionPromptEnrichment(unittest.TestCase):
         self.assertEqual(ctx["recent_outcomes"][0]["prediction_accuracy"], 0.9)
 
 
+###############################################################################
+# T056 — Brain-owned score + bridge + E2E tests
+###############################################################################
+
+from unified_brain.score import BrainScore, write_reflection_findings
+from unified_brain.metrics import MetricsRegistry
+
+
+class TestBrainScore(unittest.TestCase):
+    """T056a-d: BrainScore — prediction accuracy, interrupt rate, persistence."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.data_dir = os.path.join(self.tmpdir, "data")
+        self.score_file = os.path.join(self.tmpdir, "reflection-score.json")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+        MetricsRegistry.reset()
+
+    def _write_hook_score(self, interventions=0):
+        with open(self.score_file, "w") as f:
+            json.dump({"points": 100, "interventions": interventions}, f)
+
+    def test_default_score_is_zero(self):
+        bs = BrainScore(data_dir=self.data_dir, score_file=self.score_file)
+        self.assertEqual(bs.score, 0.0)
+        self.assertEqual(bs.prediction_accuracy, 0.0)
+        self.assertEqual(bs.total_predictions, 0)
+
+    def test_record_perfect_predictions(self):
+        bs = BrainScore(data_dir=self.data_dir, score_file=self.score_file)
+        for _ in range(5):
+            bs.record_prediction(1.0, task_id="t1")
+        self.assertAlmostEqual(bs.prediction_accuracy, 1.0)
+        # Score = 1.0 * 0.7 + interrupt_score * 0.3
+        # No score_file → interrupts=0 → interrupt_score=1.0
+        self.assertAlmostEqual(bs.score, 1.0)
+
+    def test_record_mixed_predictions(self):
+        bs = BrainScore(data_dir=self.data_dir, score_file=self.score_file)
+        bs.record_prediction(1.0)
+        bs.record_prediction(0.0)
+        self.assertAlmostEqual(bs.prediction_accuracy, 0.5)
+
+    def test_rolling_window(self):
+        bs = BrainScore(data_dir=self.data_dir, max_predictions=3, score_file=self.score_file)
+        bs.record_prediction(0.0)
+        bs.record_prediction(0.0)
+        bs.record_prediction(0.0)
+        bs.record_prediction(1.0)  # Pushes out first 0.0
+        # Window: [0.0, 0.0, 1.0]
+        self.assertAlmostEqual(bs.prediction_accuracy, 1.0 / 3.0, places=2)
+
+    def test_user_interrupt_score_with_interventions(self):
+        self._write_hook_score(interventions=2)
+        bs = BrainScore(data_dir=self.data_dir, score_file=self.score_file)
+        # baseline=5, interventions=2 → 1 - 2/5 = 0.6
+        self.assertAlmostEqual(bs.user_interrupt_score, 0.6)
+
+    def test_user_interrupt_score_clamped_at_zero(self):
+        self._write_hook_score(interventions=10)
+        bs = BrainScore(data_dir=self.data_dir, score_file=self.score_file)
+        # 1 - 10/5 = -1.0 → clamped to 0.0
+        self.assertEqual(bs.user_interrupt_score, 0.0)
+
+    def test_persistence_save_and_load(self):
+        bs = BrainScore(data_dir=self.data_dir, score_file=self.score_file)
+        bs.record_prediction(0.8, task_id="t1", details="test")
+        bs.record_prediction(0.9, task_id="t2")
+        bs.save()
+
+        # Load in new instance
+        bs2 = BrainScore(data_dir=self.data_dir, score_file=self.score_file)
+        self.assertEqual(bs2.total_predictions, 2)
+        self.assertAlmostEqual(bs2.prediction_accuracy, 0.85)
+
+    def test_weighted_score_computation(self):
+        self._write_hook_score(interventions=0)
+        bs = BrainScore(data_dir=self.data_dir, score_file=self.score_file)
+        bs.record_prediction(0.8)
+        # accuracy=0.8, interrupt_score=1.0
+        # score = 0.8*0.7 + 1.0*0.3 = 0.56 + 0.3 = 0.86
+        self.assertAlmostEqual(bs.score, 0.86, places=2)
+
+    def test_to_dict(self):
+        bs = BrainScore(data_dir=self.data_dir, score_file=self.score_file)
+        bs.record_prediction(0.7)
+        d = bs.to_dict()
+        self.assertIn("score", d)
+        self.assertIn("prediction_accuracy", d)
+        self.assertIn("total_predictions", d)
+        self.assertEqual(d["total_predictions"], 1)
+
+    def test_accuracy_clamped(self):
+        bs = BrainScore(data_dir=self.data_dir, score_file=self.score_file)
+        bs.record_prediction(1.5)  # Above 1.0
+        bs.record_prediction(-0.5)  # Below 0.0
+        self.assertAlmostEqual(bs.prediction_accuracy, 0.5)  # (1.0 + 0.0) / 2
+
+
+class TestReflectionFindings(unittest.TestCase):
+    """T056f: reflection-findings.json writer."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.conn = sqlite3.connect(":memory:")
+        self.conn.row_factory = sqlite3.Row
+        self.task_store = ReflectionTaskStore(self.conn)
+        self.findings_path = os.path.join(self.tmpdir, "reflection-findings.json")
+
+    def tearDown(self):
+        self.conn.close()
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+        MetricsRegistry.reset()
+
+    def test_write_empty_findings(self):
+        bs = BrainScore(data_dir=os.path.join(self.tmpdir, "data"),
+                        score_file=os.path.join(self.tmpdir, "nope.json"))
+        write_reflection_findings(self.findings_path, self.task_store, bs)
+        data = json.loads(open(self.findings_path).read())
+        self.assertIn("brain_score", data)
+        self.assertEqual(data["active_tasks"], [])
+        self.assertEqual(data["recent_findings"], [])
+
+    def test_write_with_active_tasks(self):
+        t = ReflectionTask(diagnosis="test issue", target_file="gate.js")
+        self.task_store.save(t)
+        bs = BrainScore(data_dir=os.path.join(self.tmpdir, "data"),
+                        score_file=os.path.join(self.tmpdir, "nope.json"))
+        write_reflection_findings(self.findings_path, self.task_store, bs)
+        data = json.loads(open(self.findings_path).read())
+        self.assertEqual(len(data["active_tasks"]), 1)
+        self.assertEqual(data["active_tasks"][0]["diagnosis"], "test issue")
+
+    def test_write_with_closed_tasks(self):
+        t = ReflectionTask(diagnosis="resolved")
+        t.add_checkpoint(100, 0.95, "verified")
+        t.state = TaskState.CLOSED
+        t.closed_at = time.time()
+        self.task_store.save(t)
+        bs = BrainScore(data_dir=os.path.join(self.tmpdir, "data"),
+                        score_file=os.path.join(self.tmpdir, "nope.json"))
+        write_reflection_findings(self.findings_path, self.task_store, bs)
+        data = json.loads(open(self.findings_path).read())
+        self.assertEqual(len(data["recent_findings"]), 1)
+        self.assertAlmostEqual(data["recent_findings"][0]["prediction_accuracy"], 0.95, places=2)
+
+
+class TestE2EReflectionHappyPath(unittest.TestCase):
+    """T056g: End-to-end — detect → predict → implement → monitor → verify → close."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.conn = sqlite3.connect(":memory:")
+        self.conn.row_factory = sqlite3.Row
+        self.task_store = ReflectionTaskStore(self.conn)
+        self.editor = FileEditor(self.tmpdir)
+        self.score_file = os.path.join(self.tmpdir, "reflection-score.json")
+        self.monitor = ReflectionMonitor(
+            task_store=self.task_store,
+            file_editor=self.editor,
+            score_file=self.score_file,
+        )
+
+    def tearDown(self):
+        self.conn.close()
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+        MetricsRegistry.reset()
+
+    def _write_score(self, points):
+        with open(self.score_file, "w") as f:
+            json.dump({"points": points}, f)
+
+    def test_full_lifecycle(self):
+        """PENDING → ANALYZING → IMPLEMENTING → MONITORING (x5 checkpoints) → VERIFIED → CLOSED."""
+        # 1. DETECT: Create a task from a detected pattern
+        self.editor.write("spec-gate.js", "// original code\nvar regex = /foo/;")
+        task = ReflectionTask(
+            diagnosis="spec-gate blocks test files with false positives",
+            target_file="spec-gate.js",
+        )
+        self.task_store.save(task)
+        self.assertEqual(task.state, TaskState.PENDING)
+
+        # 2. ANALYZE: Transition to analyzing
+        task.transition(TaskState.ANALYZING)
+        self.task_store.save(task)
+
+        # 3. IMPLEMENT: Apply fix with prediction
+        self._write_score(100)
+        prediction = Prediction(
+            expected_score_delta=10,
+            confidence=0.8,
+            reasoning="Adding test file pattern to allowlist",
+        )
+        self.monitor.implement_task(task, "// fixed code\nvar regex = /foo|test/;", prediction)
+        self.assertEqual(task.state, TaskState.MONITORING)
+        self.assertEqual(self.editor.read("spec-gate.js"), "// fixed code\nvar regex = /foo|test/;")
+
+        # 4. MONITOR: Advance through all backoff intervals
+        for i in range(len(BACKOFF_INTERVALS)):
+            # Reload task from store (monitor saves updates back to store)
+            current = self.task_store.get(task.task_id)
+            if current.state != TaskState.MONITORING:
+                break
+            # Simulate score staying positive and matching prediction
+            self._write_score(110)  # +10 from baseline of 100
+            current.implemented_at = time.time() - 9999  # Force due
+            if current.monitor_checkpoints:
+                current.monitor_checkpoints[-1].timestamp = time.time() - 9999
+            self.task_store.save(current)
+
+            results = self.monitor.check_monitoring_tasks()
+            self.assertEqual(len(results), 1)
+            _, action = results[0]
+
+            if i < len(BACKOFF_INTERVALS) - 1:
+                self.assertEqual(action, "advancing")
+            else:
+                self.assertEqual(action, "verified")
+
+        # Reload and verify final state
+        loaded = self.task_store.get(task.task_id)
+        self.assertEqual(loaded.state, TaskState.VERIFIED)
+        self.assertEqual(len(loaded.monitor_checkpoints), len(BACKOFF_INTERVALS))
+
+        # 5. CLOSE: Transition to closed
+        loaded.transition(TaskState.CLOSED)
+        loaded.closed_at = time.time()
+        self.task_store.save(loaded)
+
+        final = self.task_store.get(task.task_id)
+        self.assertEqual(final.state, TaskState.CLOSED)
+
+
+class TestE2ERollbackAndRetry(unittest.TestCase):
+    """T056h: predict wrong → score drops → rollback → re-analyze → predict again."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.conn = sqlite3.connect(":memory:")
+        self.conn.row_factory = sqlite3.Row
+        self.task_store = ReflectionTaskStore(self.conn)
+        self.editor = FileEditor(self.tmpdir)
+        self.score_file = os.path.join(self.tmpdir, "reflection-score.json")
+        self.monitor = ReflectionMonitor(
+            task_store=self.task_store,
+            file_editor=self.editor,
+            score_file=self.score_file,
+        )
+
+    def tearDown(self):
+        self.conn.close()
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+        MetricsRegistry.reset()
+
+    def _write_score(self, points):
+        with open(self.score_file, "w") as f:
+            json.dump({"points": points}, f)
+
+    def test_rollback_then_retry_succeeds(self):
+        """First attempt fails (bad prediction), rollback, second attempt succeeds."""
+        self.editor.write("gate.js", "original code")
+
+        # Create and start task
+        task = ReflectionTask(
+            diagnosis="gate regex too strict",
+            target_file="gate.js",
+            max_attempts=3,
+        )
+        task.transition(TaskState.ANALYZING)
+        self.task_store.save(task)
+
+        # ATTEMPT 1: Implement with bad prediction
+        self._write_score(100)
+        pred1 = Prediction(expected_score_delta=10, confidence=0.6)
+        self.monitor.implement_task(task, "bad fix", pred1)
+        self.assertEqual(task.state, TaskState.MONITORING)
+
+        # Score drops → rollback
+        self._write_score(80)  # Below baseline of 100
+        task.implemented_at = time.time() - 9999  # Force due
+        self.task_store.save(task)
+
+        results = self.monitor.check_monitoring_tasks()
+        _, action = results[0]
+        self.assertEqual(action, "rolled_back")
+
+        # File should be restored
+        self.assertEqual(self.editor.read("gate.js"), "original code")
+
+        # Task should be back in ANALYZING with attempts=1
+        loaded = self.task_store.get(task.task_id)
+        self.assertEqual(loaded.state, TaskState.ANALYZING)
+        self.assertEqual(loaded.attempts, 1)
+
+        # ATTEMPT 2: Better prediction this time
+        self._write_score(100)  # Reset score
+        pred2 = Prediction(expected_score_delta=5, confidence=0.9)
+        self.monitor.implement_task(loaded, "better fix", pred2)
+        self.assertEqual(loaded.state, TaskState.MONITORING)
+
+        # Score goes up as predicted
+        self._write_score(105)  # +5 matches prediction
+        loaded.implemented_at = time.time() - 9999
+        self.task_store.save(loaded)
+
+        # Advance through all checkpoints
+        for i in range(len(BACKOFF_INTERVALS)):
+            loaded = self.task_store.get(task.task_id)
+            if loaded.state != TaskState.MONITORING:
+                break
+            loaded.implemented_at = time.time() - 9999
+            if loaded.monitor_checkpoints:
+                loaded.monitor_checkpoints[-1].timestamp = time.time() - 9999
+            self.task_store.save(loaded)
+            self.monitor.check_monitoring_tasks()
+
+        final = self.task_store.get(task.task_id)
+        self.assertEqual(final.state, TaskState.VERIFIED)
+        self.assertEqual(final.attempts, 1)  # Only 1 retry was needed
+
+    def test_max_attempts_exhausted(self):
+        """Task fails after 3 bad attempts."""
+        self.editor.write("gate.js", "original")
+
+        task = ReflectionTask(
+            diagnosis="persistent issue",
+            target_file="gate.js",
+            max_attempts=2,
+        )
+        task.transition(TaskState.ANALYZING)
+        self.task_store.save(task)
+
+        for attempt in range(3):
+            loaded = self.task_store.get(task.task_id)
+            if loaded.state == TaskState.CLOSED:
+                break
+
+            if loaded.state != TaskState.ANALYZING:
+                break
+
+            self._write_score(100)
+            self.monitor.implement_task(loaded, f"fix attempt {attempt}", Prediction(expected_score_delta=10))
+            self._write_score(80)  # Always drops
+            loaded.implemented_at = time.time() - 9999
+            self.task_store.save(loaded)
+            self.monitor.check_monitoring_tasks()
+
+        final = self.task_store.get(task.task_id)
+        self.assertEqual(final.state, TaskState.CLOSED)  # Force-closed on max attempts
+        # File should be restored to original
+        self.assertEqual(self.editor.read("gate.js"), "original")
+
+
 if __name__ == "__main__":
     unittest.main()
