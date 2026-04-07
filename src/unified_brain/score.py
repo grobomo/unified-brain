@@ -9,12 +9,12 @@ the user is away. User interrupts are valuable signal but intermittent.
 
 import json
 import logging
-import os
 import time
 from collections import deque
 from pathlib import Path
 
 from .metrics import registry, Counter, Gauge
+from .utils import read_score_file
 
 logger = logging.getLogger(__name__)
 
@@ -49,9 +49,7 @@ class BrainScore:
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.score_path = self.data_dir / "brain-score.json"
         self.max_predictions = max_predictions
-        self.score_file = Path(score_file or os.path.expanduser(
-            "~/.claude/hooks/reflection-score.json"
-        ))
+        self.score_file = score_file
 
         # Rolling prediction tracker
         self._predictions: deque = deque(maxlen=max_predictions)
@@ -157,12 +155,7 @@ class BrainScore:
 
     def _read_hook_score(self) -> dict:
         """Read hook-runner's reflection-score.json for interrupt data."""
-        if not self.score_file.exists():
-            return {}
-        try:
-            return json.loads(self.score_file.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            return {}
+        return read_score_file(self.score_file)
 
     def to_dict(self) -> dict:
         """Return score breakdown for reporting."""
