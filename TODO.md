@@ -131,9 +131,10 @@ Data files (all in `~/.claude/hooks/`):
 - `reflection-score.json` — gamified score (points, level, streak, intervention counts)
 - `reflection-claude-log.jsonl` — full claude -p audit (prompt, response, timing)
 
-- [x] T053: Hook-runner channel adapter — ingests hook-log.jsonl + self-reflection.jsonl as events. Brain's three-tier memory gives persistent context across sessions. Self-reflection becomes a brain channel instead of standalone claude -p calls.
-- [ ] T054: Reflection analysis action — brain analyzes hook events with full memory context (past sessions, recurring patterns, correction history), returns structured findings via RESPOND action. Replaces self-reflection.js's direct claude -p call with brain's enriched prompt.
-- [ ] T055: Reflection bridge — hook-runner writes events to bridge dir, brain analyzes, writes findings back to `~/.claude/hooks/reflection-findings.json`. Hook-runner reads findings and enforces via reflection-gate. Clean separation: brain thinks, hook-runner enforces.
+- [x] T053: Hook-runner channel adapter — ingests hook-log.jsonl + self-reflection.jsonl as events
+- [ ] T054: ReflectionTask lifecycle — state machine (detect → predict → implement → monitor → verify → close), exponential backoff (30s→30m), rollback on prediction mismatch, max 3 attempts
+- [ ] T055: Reflection implementer — file backup/edit/rollback for hook modules, brain prompt enrichment with prediction history, per-module calibration in Tier 2 memory
+- [ ] T056: Brain-owned score — prediction accuracy (70%) + user interrupt rate (30%), rolling tracker, score persistence, Prometheus metrics, reflection-findings.json bridge
 
 ## Session Handoff
 PRs #1-32 merged/open. 52 tasks done (T001-T052), spec 006 complete.
@@ -147,4 +148,6 @@ PRs #1-32 merged/open. 52 tasks done (T001-T052), spec 006 complete.
 - Docker Compose: one-command startup with brain + Prometheus + Grafana
 - Deployment artifacts: Dockerfile, K8s manifests (kustomize), CloudFormation (EC2 spot + SQS)
 - PR #32 open: T049-T052 (interactive chat, personas, LLM logging, adapter filtering)
-- Next: Phase 13 (T053-T055) — hook-runner self-reflection as brain channel (cross-project with hook-runner)
+- PR #32 open: T049-T052 (interactive chat, personas, LLM logging, adapter filtering)
+- T053 done on branch 033-T053-hook-runner-adapter, pushed, needs PR
+- Next: T054 (reflection analysis action), T055 (reflection bridge)
