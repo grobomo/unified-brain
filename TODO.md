@@ -196,10 +196,12 @@ Interactive: SSH chat, /ask endpoint     No UI: headless execution only
 - [ ] T069: Calendar adapter — MS Graph calendar poller, ingests upcoming meetings/changes as events.
 
 ## Session Handoff
-PRs #1-35 open/merged. 59 tasks done (T001-T059).
+PRs #1-35 open/merged. 59 tasks done (T001-T059). Spec 008 written.
 - 273 tests passing, zero external deps for core
-- Branch 036-T059-loop-analyzer: T059 done + DRY cleanup committed
-- Open PRs: #33 (spec 007), #34 (DRY cleanup), #35 (loop analyzer)
-- User direction: brain + ccc (claude-portable) integration, archive ccc-manager
-- Brain = persistent thinker in RONE. CCC = on-demand worker. No middleman.
-- Next: T063 (archive ccc-manager), then T064 (CCC bridge)
+- Branch 036-T059-loop-analyzer: T059 done, spec 008 committed, needs push
+- Open PRs: #32 merged, #33/#34/#35 need rebase onto main (squash merge broke chain)
+- PR chain fix: retarget #33/#34/#35 to main, rebase each, merge in order
+- `/brain` skill created at `~/.claude/skills/brain-chat/` but needs rework (can't use subprocess claude -p from Claude Code — brain's own LLM backend works standalone only)
+- asyncssh installed via pip for T066
+- User direction: brain = persistent always-on thinker in RONE with SSH chat. CCC (claude-portable) = stateless worker. ccc-manager archived. Brain dispatches WORK to CCC, does its own THINKING via claude -p/API.
+- Next: T063 (archive ccc-manager), T064 (CCC bridge adapter), T066 (SSH chat server)
