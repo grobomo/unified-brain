@@ -4144,5 +4144,416 @@ class TestE2ERollbackAndRetry(unittest.TestCase):
         self.assertEqual(self.editor.read("gate.js"), "original")
 
 
+###############################################################################
+# T059: Loop Pattern Analyzer Tests
+###############################################################################
+
+class TestLoopAnalyzerDetection(unittest.TestCase):
+    """Tests for loop issue detection from reflection events."""
+
+    def test_is_loop_issue_positive(self):
+        """Issues with loop keywords are detected."""
+        from unified_brain.loop_analyzer import is_loop_issue
+        self.assertTrue(is_loop_issue({
+            "description": "Multiple failed attempts at cherry-pick",
+            "severity": "high",
+        }))
+
+    def test_is_loop_issue_negative(self):
+        """Normal issues are not flagged as loops."""
+        from unified_brain.loop_analyzer import is_loop_issue
+        self.assertFalse(is_loop_issue({
+            "description": "Missing docstring in module",
+            "severity": "low",
+        }))
+
+    def test_is_loop_issue_fix_field(self):
+        """Loop keywords in fix field also match."""
+        from unified_brain.loop_analyzer import is_loop_issue
+        self.assertTrue(is_loop_issue({
+            "description": "Some issue",
+            "fix": "Stop retrying manually, automate the deploy",
+        }))
+
+    def test_is_loop_issue_various_keywords(self):
+        """Various loop keywords are detected."""
+        from unified_brain.loop_analyzer import is_loop_issue
+        keywords_to_test = [
+            "unproductive loop detected",
+            "manual patching of each failure",
+            "struggling with infrastructure",
+            "branch gymnastics",
+            "rebase conflict loop",
+        ]
+        for kw in keywords_to_test:
+            self.assertTrue(is_loop_issue({"description": kw}),
+                            f"Should detect: {kw}")
+
+
+class TestBashCommandExtraction(unittest.TestCase):
+    """Tests for hook-log.jsonl command extraction."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.log_path = os.path.join(self.tmpdir, "hook-log.jsonl")
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_extract_bash_commands(self):
+        """Extracts Bash tool entries from hook-log JSONL."""
+        from unified_brain.loop_analyzer import extract_bash_commands
+        lines = [
+            json.dumps({"tool": "Bash", "command": "git cherry-pick abc123", "ts": "2026-04-06T10:00:00Z"}),
+            json.dumps({"tool": "Edit", "file": "foo.py", "ts": "2026-04-06T10:01:00Z"}),
+            json.dumps({"tool": "Bash", "command": "git cherry-pick def456", "ts": "2026-04-06T10:02:00Z"}),
+        ]
+        with open(self.log_path, "w") as f:
+            f.write("\n".join(lines) + "\n")
+
+        cmds = extract_bash_commands(self.log_path)
+        self.assertEqual(len(cmds), 2)
+        self.assertIn("cherry-pick", cmds[0]["command"])
+
+    def test_extract_empty_file(self):
+        """Empty/missing file returns empty list."""
+        from unified_brain.loop_analyzer import extract_bash_commands
+        self.assertEqual(extract_bash_commands("/nonexistent/path"), [])
+
+    def test_extract_max_lines(self):
+        """Only reads last N lines."""
+        from unified_brain.loop_analyzer import extract_bash_commands
+        lines = [
+            json.dumps({"tool": "Bash", "command": f"cmd-{i}", "ts": ""})
+            for i in range(50)
+        ]
+        with open(self.log_path, "w") as f:
+            f.write("\n".join(lines) + "\n")
+
+        cmds = extract_bash_commands(self.log_path, max_lines=10)
+        self.assertEqual(len(cmds), 10)
+        self.assertIn("cmd-40", cmds[0]["command"])
+
+
+class TestRepeatedCommands(unittest.TestCase):
+    """Tests for repeated command detection."""
+
+    def test_find_repeated_commands(self):
+        """Detects commands repeated >= threshold times."""
+        from unified_brain.loop_analyzer import find_repeated_commands
+        cmds = [
+            {"command": "git cherry-pick abc123"},
+            {"command": "git cherry-pick abc123"},
+            {"command": "git cherry-pick abc123"},
+            {"command": "npm test"},
+        ]
+        repeated = find_repeated_commands(cmds, threshold=3)
+        self.assertEqual(len(repeated), 1)
+        self.assertEqual(repeated[0]["count"], 3)
+
+    def test_no_repeats(self):
+        """No false positives when commands are unique."""
+        from unified_brain.loop_analyzer import find_repeated_commands
+        cmds = [
+            {"command": "git status"},
+            {"command": "npm install"},
+            {"command": "python test.py"},
+        ]
+        repeated = find_repeated_commands(cmds, threshold=3)
+        self.assertEqual(len(repeated), 0)
+
+    def test_find_matching_patterns(self):
+        """Detects known retry patterns."""
+        from unified_brain.loop_analyzer import find_matching_patterns
+        cmds = [
+            {"command": "git cherry-pick abc123", "ts": ""},
+            {"command": "git rebase main", "ts": ""},
+            {"command": "echo hello", "ts": ""},
+        ]
+        matches = find_matching_patterns(cmds)
+        self.assertEqual(len(matches), 2)
+
+
+class TestLoopAnalysis(unittest.TestCase):
+    """Tests for the analyze_loop function."""
+
+    def test_analyze_with_repeated_commands(self):
+        """Produces LoopPattern from issue + command evidence."""
+        from unified_brain.loop_analyzer import analyze_loop
+        issue = {
+            "description": "Multiple failed cherry-pick attempts",
+            "severity": "high",
+        }
+        commands = [
+            {"command": "git cherry-pick abc123"},
+            {"command": "git cherry-pick abc123"},
+            {"command": "git cherry-pick abc123"},
+            {"command": "git cherry-pick abc123"},
+        ]
+        pattern = analyze_loop(issue, commands, project="test-project", branch="main")
+        self.assertIn("4x", pattern.root_cause)
+        self.assertEqual(pattern.project, "test-project")
+        self.assertEqual(pattern.severity, "high")
+        self.assertTrue(len(pattern.suggested_fix) > 0)
+
+    def test_analyze_deploy_loop(self):
+        """Deploy loops get deploy.sh suggestion."""
+        from unified_brain.loop_analyzer import analyze_loop
+        issue = {"description": "Struggling with deploy uploads", "severity": "medium"}
+        commands = [
+            {"command": "scp dist.zip deploy-host:/uploads"},
+            {"command": "scp dist.zip deploy-host:/uploads"},
+            {"command": "scp dist.zip deploy-host:/uploads"},
+        ]
+        pattern = analyze_loop(issue, commands)
+        self.assertIn("deploy", pattern.suggested_fix.lower())
+
+    def test_analyze_no_commands(self):
+        """Still produces pattern even without command evidence."""
+        from unified_brain.loop_analyzer import analyze_loop
+        issue = {"description": "Unproductive loop in session", "severity": "low"}
+        pattern = analyze_loop(issue, [])
+        self.assertIn("Reflection flagged", pattern.root_cause)
+
+
+class TestLoopAnalyzerIntegration(unittest.TestCase):
+    """Tests for LoopAnalyzer with memory integration."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.db_path = os.path.join(self.tmpdir, "test.db")
+        self.conn = sqlite3.connect(self.db_path)
+        from unified_brain.memory import MemoryManager
+        self.memory = MemoryManager(self.conn)
+
+        self.log_path = os.path.join(self.tmpdir, "hook-log.jsonl")
+        # Write some Bash commands to the hook log
+        lines = [
+            json.dumps({"tool": "Bash", "command": "git cherry-pick abc", "ts": ""}),
+            json.dumps({"tool": "Bash", "command": "git cherry-pick abc", "ts": ""}),
+            json.dumps({"tool": "Bash", "command": "git cherry-pick abc", "ts": ""}),
+        ]
+        with open(self.log_path, "w") as f:
+            f.write("\n".join(lines) + "\n")
+
+    def tearDown(self):
+        self.conn.close()
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_process_reflection_event_with_loop(self):
+        """Processes a reflection event and detects loop pattern."""
+        from unified_brain.loop_analyzer import LoopAnalyzer
+        analyzer = LoopAnalyzer(memory=self.memory, hook_log_path=self.log_path)
+
+        event = {
+            "id": "reflect:test1",
+            "source": "hook-runner",
+            "channel": "self-reflection",
+            "event_type": "reflection_result",
+            "title": "Reflection: needs-attention (1 issues)",
+            "body": "Issues: Multiple failed cherry-pick attempts detected",
+            "metadata": {"verdict": "needs-attention", "project": "test-proj"},
+        }
+
+        patterns = analyzer.process_reflection_event(event)
+        self.assertEqual(len(patterns), 1)
+        self.assertIn("cherry-pick", patterns[0].root_cause.lower())
+
+    def test_process_non_loop_event(self):
+        """Non-loop reflection events produce no patterns."""
+        from unified_brain.loop_analyzer import LoopAnalyzer
+        analyzer = LoopAnalyzer(memory=self.memory, hook_log_path=self.log_path)
+
+        event = {
+            "id": "reflect:test2",
+            "source": "hook-runner",
+            "channel": "self-reflection",
+            "event_type": "reflection_result",
+            "title": "Reflection: clean",
+            "body": "Issues: Missing docstring in module",
+            "metadata": {"verdict": "clean"},
+        }
+
+        patterns = analyzer.process_reflection_event(event)
+        self.assertEqual(len(patterns), 0)
+
+    def test_process_non_reflection_channel(self):
+        """Non self-reflection events are ignored."""
+        from unified_brain.loop_analyzer import LoopAnalyzer
+        analyzer = LoopAnalyzer(memory=self.memory, hook_log_path=self.log_path)
+
+        event = {
+            "id": "hooklog:test3",
+            "source": "hook-runner",
+            "channel": "hook-log",
+            "event_type": "gate_block",
+            "title": "Retry loop detected",
+            "body": "Retry loop pattern",
+        }
+
+        patterns = analyzer.process_reflection_event(event)
+        self.assertEqual(len(patterns), 0)
+
+    def test_memory_persistence(self):
+        """Loop patterns are stored in Tier 3 global memory."""
+        from unified_brain.loop_analyzer import LoopAnalyzer
+        analyzer = LoopAnalyzer(memory=self.memory, hook_log_path=self.log_path)
+
+        event = {
+            "id": "reflect:mem1",
+            "source": "hook-runner",
+            "channel": "self-reflection",
+            "event_type": "reflection_result",
+            "title": "Reflection: needs-attention",
+            "body": "Issues: Unproductive loop — manual patching of deploy failures",
+            "metadata": {"project": "test-proj"},
+        }
+
+        analyzer.process_reflection_event(event)
+
+        data = self.memory.get_global_memory("loop_patterns")
+        self.assertIsNotNone(data)
+        self.assertEqual(data["total_detected"], 1)
+        self.assertEqual(len(data["patterns"]), 1)
+
+    def test_recurrence_tracking(self):
+        """Repeated loop patterns increment recurrence counter."""
+        from unified_brain.loop_analyzer import LoopAnalyzer
+        analyzer = LoopAnalyzer(memory=self.memory, hook_log_path=self.log_path)
+
+        for i in range(3):
+            event = {
+                "id": f"reflect:rec{i}",
+                "source": "hook-runner",
+                "channel": "self-reflection",
+                "event_type": "reflection_result",
+                "title": "Reflection: needs-attention",
+                "body": "Issues: Unproductive loop — retry deploy upload",
+                "metadata": {"project": "test-proj"},
+            }
+            analyzer.process_reflection_event(event)
+
+        data = self.memory.get_global_memory("loop_patterns")
+        self.assertEqual(data["total_detected"], 3)
+        # All have same root cause signature, so one recurrence entry
+        recurrences = data["recurrences"]
+        self.assertTrue(len(recurrences) >= 1)
+        # At least one recurrence should have count >= 2
+        max_count = max(v["count"] for v in recurrences.values())
+        self.assertGreaterEqual(max_count, 2)
+
+    def test_get_context_for_prompt(self):
+        """Generates prompt context string from stored patterns."""
+        from unified_brain.loop_analyzer import LoopAnalyzer
+        analyzer = LoopAnalyzer(memory=self.memory, hook_log_path=self.log_path)
+
+        # No patterns yet — empty context
+        self.assertEqual(analyzer.get_context_for_prompt(), "")
+
+        # Add a pattern
+        event = {
+            "id": "reflect:ctx1",
+            "source": "hook-runner",
+            "channel": "self-reflection",
+            "event_type": "reflection_result",
+            "title": "Reflection: needs-attention",
+            "body": "Issues: Unproductive loop in deploy process",
+            "metadata": {"project": "proj-x"},
+        }
+        analyzer.process_reflection_event(event)
+
+        ctx = analyzer.get_context_for_prompt()
+        self.assertIn("Loop Pattern History", ctx)
+        self.assertIn("1 total detected", ctx)
+
+    def test_json_body_parsing(self):
+        """Handles JSON body format from reflection events."""
+        from unified_brain.loop_analyzer import LoopAnalyzer
+        analyzer = LoopAnalyzer(memory=self.memory, hook_log_path=self.log_path)
+
+        body = json.dumps({
+            "issues": [
+                {"description": "Retry loop: 5 failed cherry-picks", "severity": "high"},
+                {"description": "Missing docstring", "severity": "low"},
+            ],
+            "verdict": "needs-attention",
+        })
+
+        event = {
+            "id": "reflect:json1",
+            "source": "hook-runner",
+            "channel": "self-reflection",
+            "event_type": "reflection_result",
+            "title": "Reflection: needs-attention",
+            "body": body,
+            "metadata": {},
+        }
+
+        patterns = analyzer.process_reflection_event(event)
+        # Only the loop issue should be detected, not the docstring one
+        self.assertEqual(len(patterns), 1)
+        self.assertIn("cherry-pick", patterns[0].description.lower())
+
+
+class TestLoopAnalyzerServiceIntegration(unittest.TestCase):
+    """E2E test: loop detection through the service pipeline."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.db_path = os.path.join(self.tmpdir, "test.db")
+
+        # Write hook-log with retry pattern
+        self.log_path = os.path.join(self.tmpdir, "hook-log.jsonl")
+        lines = [
+            json.dumps({"tool": "Bash", "command": f"kubectl apply -f deploy.yaml", "ts": ""})
+            for _ in range(5)
+        ]
+        with open(self.log_path, "w") as f:
+            f.write("\n".join(lines) + "\n")
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_service_loop_detects_loops(self):
+        """BrainService detects loop patterns from hook-runner events."""
+        from unified_brain.service import BrainService
+        service = BrainService({
+            "db_path": self.db_path,
+            "hook_log_path": self.log_path,
+            "brain": {"claude_path": "echo"},
+        })
+
+        # Simulate ingesting a reflection event with a loop issue
+        event = {
+            "id": "reflect:e2e1",
+            "source": "hook-runner",
+            "channel": "self-reflection",
+            "event_type": "reflection_result",
+            "author": "self-reflection",
+            "title": "Reflection: needs-attention",
+            "body": "Issues: Unproductive loop — repeated kubectl apply retries",
+            "created_at": time.time(),
+            "metadata": {"project": "test-deploy"},
+        }
+
+        # Process through loop analyzer
+        patterns = service.loop_analyzer.process_reflection_event(event)
+        self.assertGreater(len(patterns), 0)
+
+        # Verify Tier 3 memory was updated
+        data = service.memory.get_global_memory("loop_patterns")
+        self.assertIsNotNone(data)
+        self.assertGreater(data["total_detected"], 0)
+
+        # Verify prompt context is generated
+        ctx = service.loop_analyzer.get_context_for_prompt()
+        self.assertIn("Loop Pattern History", ctx)
+
+        service.store.close()
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -4,7 +4,8 @@ import json
 import os
 from pathlib import Path
 
-DEFAULT_SCORE_FILE = os.path.expanduser("~/.claude/hooks/reflection-score.json")
+DEFAULT_HOOKS_DIR = os.path.expanduser("~/.claude/hooks")
+DEFAULT_SCORE_FILE = os.path.join(DEFAULT_HOOKS_DIR, "reflection-score.json")
 
 
 def read_score_file(score_file: str = "") -> dict:

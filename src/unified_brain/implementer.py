@@ -20,7 +20,7 @@ from .reflection import (
     TaskState,
     compute_prediction_accuracy,
 )
-from .utils import read_score_file
+from .utils import DEFAULT_HOOKS_DIR, read_score_file
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +32,7 @@ class FileEditor:
     """
 
     def __init__(self, base_dir: str = ""):
-        self.base_dir = Path(base_dir or os.path.expanduser("~/.claude/hooks"))
+        self.base_dir = Path(base_dir or DEFAULT_HOOKS_DIR)
 
     def _resolve(self, target_file: str) -> Path:
         """Resolve target_file to an absolute path within base_dir."""

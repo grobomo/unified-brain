@@ -31,6 +31,7 @@ Webhook/API        ──→  Cross-channel Context                      - EC2 (
 - **Interactive chat** — CLI REPL, REST `/chat`, WebSocket `/ws/chat` with persistent per-user conversation sessions
 - **Persona system** — per-user brain identity (name + emoji), self-message filtering in all adapters
 - **Closed-loop self-improvement** — detects patterns in hook-runner events, predicts outcomes before changes, implements fixes, monitors with exponential backoff, rolls back on prediction mismatch
+- **Loop pattern analyzer** — detects unproductive loops (retries, cherry-pick conflicts, manual deploy patching), identifies root cause from command history, suggests automation, tracks recurrence in Tier 3 memory
 - **Brain-owned score** — prediction accuracy (70%) + user interrupt rate (30%), rolling tracker, Prometheus metrics
 - **Feedback loop** — tracks dispatch/respond outcomes, feeds success/failure patterns back to the brain prompt
 - **Active respond** — posts GitHub comments, Teams messages, and Slack messages directly via channel APIs, falls back to outbox
@@ -124,7 +125,7 @@ Secret fields (Teams chat IDs) go in `config/projects.local.json` (gitignored), 
 PYTHONPATH=src python -m pytest tests/ -v
 ```
 
-252 integration tests covering: store, brain, dispatcher, registry, context, memory, outbox, adapters (GitHub, Teams, Slack, Webhook, Hook-runner), transport factory, SQS mock, config overlay, env interpolation, active respond, Prometheus metrics, feedback loop, rate limiting, interactive chat, persona system, LLM logging, self-message filtering, reflection task lifecycle, file edit/rollback, prediction-outcome scoring, brain score, E2E self-improvement loops.
+273 integration tests covering: store, brain, dispatcher, registry, context, memory, outbox, adapters (GitHub, Teams, Slack, Webhook, Hook-runner), transport factory, SQS mock, config overlay, env interpolation, active respond, Prometheus metrics, feedback loop, rate limiting, interactive chat, persona system, LLM logging, self-message filtering, reflection task lifecycle, file edit/rollback, prediction-outcome scoring, brain score, loop pattern detection/analysis/memory/recurrence, E2E self-improvement loops.
 
 ## Dependencies
 

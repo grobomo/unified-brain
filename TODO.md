@@ -24,7 +24,7 @@ Webhook/API        ──→  Three-tier Memory           ──DISPATCH──�
 ```
 
 ## What exists today
-- unified-brain — self-contained: EventStore (SQLite+FTS), brain.py (pluggable LLM), dispatcher.py (pluggable transport), context.py, memory.py, feedback.py, metrics.py, executor.py, adapters (GitHub, Teams, Webhook), 88 tests
+- unified-brain — self-contained: EventStore (SQLite+FTS), brain.py (pluggable LLM), dispatcher.py (pluggable transport), context.py, memory.py, feedback.py, metrics.py, executor.py, loop_analyzer.py, adapters (GitHub, Teams, Webhook, HookRunner), 273 tests
 - ccc-manager — task execution: BridgeInput/SQSInput, workers (local/K8s/EC2), fleet coordination, verification, Prometheus
 - Active respond: ActionExecutor posts GitHub comments + Teams messages directly via APIs
 - Observability: Prometheus /metrics endpoint, feedback loop tracks dispatch outcomes
@@ -143,16 +143,65 @@ retry patterns, cherry-pick conflicts, manual patching). Self-reflection flags t
 brain should do the deep analysis: identify root cause, suggest systemic fix (automate pipeline),
 track whether the pattern recurs across sessions.
 
-- [ ] T059: Loop pattern analyzer — when reflection adapter receives "unproductive loop" issues, brain should: (1) identify the root cause from command history, (2) suggest an automation fix (e.g. "create a deploy.sh that handles zip+upload+verify"), (3) track recurrence in Tier 3 memory (global patterns). Data source: `reflection-sessions.jsonl` (has failed command counts) + `hook-log.jsonl` (has individual Bash commands).
+- [x] T059: Loop pattern analyzer — detects unproductive loops from reflection events, identifies root cause from Bash command history, suggests automation fixes, tracks recurrence in Tier 3 memory (global patterns). 21 tests.
 
 ## Phase 14: Hardening & Cleanup
 - [x] T057: DRY score file reading — extract read_score_file to utils.py, deduplicate from implementer.py + score.py
 - [x] T058: Update README + docs — reflect spec 007 (reflection plugin, 252 tests, brain score)
 
+## Phase 15: System Monitor Integration
+Source: `_grobomo/system-monitor` focus guard module.
+System-monitor emits JSON events to `~/.system-monitor/events/` when cmd.exe/python.exe/powershell.exe
+processes appear (potential focus stealers). Brain needs a channel adapter to consume these events,
+analyze the source project, write TODOs in offending projects, and dispatch fix sessions.
+
+- [ ] T060: System monitor channel adapter — polls `~/.system-monitor/events/*.json`, yields normalized events (type=focus_steal), dedup by event filename, marks consumed (rename to .processed or delete)
+- [ ] T061: Focus-steal action router — when brain sees focus_steal event with `source_project` set, write a TODO in that project's TODO.md with fix instructions (CREATE_NO_WINDOW, -WindowStyle Hidden, etc), then dispatch `context_reset.py --project-dir <project>` to start a fix session
+- [ ] T062: Focus-steal without source_project — when source is unknown (e.g. Azure CLI, Intune agent), log to Tier 2 memory as "system noise" for pattern tracking, no dispatch
+
+Event JSON schema (from system-monitor):
+```json
+{
+  "type": "focus_steal",
+  "timestamp": "2026-04-06 23:36:56.718",
+  "process": { "pid": 356, "name": "python.exe", "exe_path": "...", "command_line": "..." },
+  "parent_chain": "python.exe(356) -> bash.exe(5256)",
+  "classification": "SAFE",
+  "source_project": "_grobomo/system-monitor" or null
+}
+```
+
+## Phase 16: Brain + CCC Integration
+Brain is the thinker. CCC (`_grobomo/claude-portable`, to be renamed `ccc`) is the doer.
+Brain decides, CCC executes. ccc-manager is archived — brain replaces it.
+
+Architecture:
+```
+unified-brain (RONE K8s, persistent)     ccc (claude-portable, on-demand)
+────────────────────────────────────     ────────────────────────────────
+Ingests: GitHub, Teams, email, cal       Workers: local, K8s pod, EC2
+Thinks: claude -p / Anthropic API        Runs: full Claude Code sessions
+Decides: RESPOND / WORK / ALERT / LOG   Does: file edits, git, PRs, tests
+Monitors: tracks dispatched work         Reports: result JSON back to brain
+Remembers: 3-tier memory                 Stateless: spins up, does job, dies
+Interactive: SSH chat, /ask endpoint     No UI: headless execution only
+```
+
+- [ ] T063: Archive ccc-manager — mark absorbed, redirect TODO.md to brain, extract any useful dispatch/bridge code into brain
+- [ ] T064: CCC bridge adapter — brain dispatches WORK tasks to ccc (claude-portable) via its existing dispatch mechanism (bridge dir, scripts/fleet/). Brain writes task JSON, ccc picks it up.
+- [ ] T065: CCC result monitor — brain polls for completed ccc tasks, verifies outcomes (prediction/outcome comparison from T054-T056), re-dispatches or alerts on failure
+- [ ] T066: SSH chat server — asyncssh server in brain, drops users into chat REPL. Brain accessible via `ssh brain@rone-host`. Persistent sessions, conversation history.
+- [ ] T067: Idle loop — brain runs periodic tasks between event cycles: compact memory, check dispatched work, run self-reflection, surface proactive insights ("daydreaming")
+- [ ] T068: Email adapter — MS Graph inbox poller (like Teams adapter), ingests emails as events. Uses msgraph-lib shared tokens.
+- [ ] T069: Calendar adapter — MS Graph calendar poller, ingests upcoming meetings/changes as events.
+
 ## Session Handoff
-PRs #1-33 merged/open. 58 tasks done (T001-T058), spec 007 complete.
-- 252 tests passing, zero external deps for core
-- Branch 035-T057-dry-cleanup: T057-T058 done, needs PR
-- Open PRs: #33 (spec 007: T053-T056), needs PR for #035 branch (T057-T058)
-- SHTD workflow state file uses "completed" not "complete" (workflow.js line 269)
-- Next: T059 (loop pattern analyzer from hook-runner T335)
+PRs #1-35 open/merged. 59 tasks done (T001-T059). Spec 008 written.
+- 273 tests passing, zero external deps for core
+- Branch 036-T059-loop-analyzer: T059 done, spec 008 committed, needs push
+- Open PRs: #32 merged, #33/#34/#35 need rebase onto main (squash merge broke chain)
+- PR chain fix: retarget #33/#34/#35 to main, rebase each, merge in order
+- `/brain` skill created at `~/.claude/skills/brain-chat/` but needs rework (can't use subprocess claude -p from Claude Code — brain's own LLM backend works standalone only)
+- asyncssh installed via pip for T066
+- User direction: brain = persistent always-on thinker in RONE with SSH chat. CCC (claude-portable) = stateless worker. ccc-manager archived. Brain dispatches WORK to CCC, does its own THINKING via claude -p/API.
+- Next: T063 (archive ccc-manager), T064 (CCC bridge adapter), T066 (SSH chat server)
