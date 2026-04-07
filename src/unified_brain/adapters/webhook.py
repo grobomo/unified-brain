@@ -9,6 +9,9 @@ Endpoints:
   GET  /events/stats — queue depth and accepted count
 
 Events are queued in-memory and drained each poll cycle by the service.
+
+The /ask endpoint provides synchronous brain analysis: post a question,
+get the brain's decision back as the HTTP response (conversational mode).
 """
 
 import hashlib
@@ -24,6 +27,50 @@ from .base import ChannelAdapter, parse_timestamp
 logger = logging.getLogger(__name__)
 
 
+class TokenBucket:
+    """Token bucket rate limiter — per-key (e.g. per IP).
+
+    Args:
+        rate: tokens added per second
+        burst: maximum tokens (bucket capacity)
+    """
+
+    def __init__(self, rate: float = 10.0, burst: int = 20):
+        self.rate = rate
+        self.burst = burst
+        self._buckets: dict[str, list] = {}  # key -> [tokens, last_refill_time]
+        self._lock = threading.Lock()
+
+    def allow(self, key: str) -> bool:
+        """Check if a request from `key` is allowed. Consumes one token if so."""
+        now = time.monotonic()
+        with self._lock:
+            if key not in self._buckets:
+                self._buckets[key] = [self.burst - 1, now]
+                return True
+
+            tokens, last = self._buckets[key]
+            # Refill tokens based on elapsed time
+            elapsed = now - last
+            tokens = min(self.burst, tokens + elapsed * self.rate)
+            self._buckets[key][1] = now
+
+            if tokens >= 1:
+                self._buckets[key][0] = tokens - 1
+                return True
+            else:
+                self._buckets[key][0] = tokens
+                return False
+
+    def cleanup(self, max_age: float = 3600):
+        """Remove stale entries older than max_age seconds."""
+        now = time.monotonic()
+        with self._lock:
+            stale = [k for k, (_, t) in self._buckets.items() if now - t > max_age]
+            for k in stale:
+                del self._buckets[k]
+
+
 class _WebhookHandler(BaseHTTPRequestHandler):
     """HTTP handler for incoming webhook events."""
 
@@ -31,9 +78,26 @@ class _WebhookHandler(BaseHTTPRequestHandler):
     event_queue: queue.Queue = None
     accepted_count: int = 0
     secret: str = ""
+    rate_limiter: TokenBucket | None = None
+    brain_analyzer = None  # set by WebhookAdapter for /ask endpoint
+    context_builder = None  # set by WebhookAdapter for /ask endpoint
     _lock = threading.Lock()
 
+    def _get_client_ip(self) -> str:
+        """Extract client IP, respecting X-Forwarded-For behind a proxy."""
+        forwarded = self.headers.get("X-Forwarded-For", "")
+        if forwarded:
+            return forwarded.split(",")[0].strip()
+        return self.client_address[0]
+
     def do_POST(self):
+        # Rate limiting
+        if self.rate_limiter:
+            client_ip = self._get_client_ip()
+            if not self.rate_limiter.allow(client_ip):
+                self._respond(429, {"error": "Rate limit exceeded"})
+                return
+
         content_length = int(self.headers.get("Content-Length", 0))
         if content_length > 1_000_000:  # 1MB limit
             self._respond(413, {"error": "Payload too large"})
@@ -54,7 +118,10 @@ class _WebhookHandler(BaseHTTPRequestHandler):
             self._respond(400, {"error": "Invalid JSON"})
             return
 
-        if self.path == "/events":
+        if self.path == "/ask":
+            self._handle_ask(payload)
+            return
+        elif self.path == "/events":
             events = self._normalize_events(payload)
         elif self.path == "/events/raw":
             events = self._normalize_raw(payload)
@@ -80,6 +147,57 @@ class _WebhookHandler(BaseHTTPRequestHandler):
             self._respond(200, stats)
         else:
             self._respond(404, {"error": "Not found"})
+
+    def _handle_ask(self, payload: dict):
+        """Synchronous brain analysis — runs the brain and returns the response.
+
+        POST /ask with:
+            {"question": "What should we prioritize?", "source": "user", "author": "joel"}
+
+        Returns the brain's action decision as JSON.
+        """
+        if not self.brain_analyzer:
+            self._respond(503, {"error": "Brain analyzer not available"})
+            return
+
+        question = payload.get("question", payload.get("body", payload.get("text", "")))
+        if not question:
+            self._respond(400, {"error": "Missing 'question' field"})
+            return
+
+        # Build a synthetic event from the question
+        event = {
+            "id": f"ask:{hashlib.sha256(question.encode()).hexdigest()[:12]}",
+            "source": payload.get("source", "ask"),
+            "channel": payload.get("channel", "console"),
+            "event_type": "question",
+            "author": payload.get("author", "user"),
+            "title": question[:100],
+            "body": question,
+            "created_at": time.time(),
+            "metadata": {},
+        }
+
+        # Build context if available
+        context = {}
+        if self.context_builder:
+            try:
+                context = self.context_builder.build(event)
+            except Exception as e:
+                logger.warning(f"/ask context build failed: {e}")
+
+        # Run the brain synchronously
+        try:
+            action = self.brain_analyzer.analyze(event, context)
+            self._respond(200, {
+                "action": action.get("action", "log"),
+                "content": action.get("content", ""),
+                "reason": action.get("reason", ""),
+                "event_id": event["id"],
+            })
+        except Exception as e:
+            logger.error(f"/ask brain error: {e}")
+            self._respond(500, {"error": f"Brain analysis failed: {e}"})
 
     def _normalize_events(self, payload) -> list[dict]:
         """Normalize a JSON payload into event dicts.
@@ -165,13 +283,17 @@ class WebhookAdapter(ChannelAdapter):
         webhook_port: int — port to listen on (default 8791)
         webhook_secret: str — HMAC secret for signature verification (optional)
         webhook_bind: str — bind address (default 0.0.0.0)
+        webhook_rate_limit: float — requests/sec per IP (default 10.0, 0 to disable)
+        webhook_rate_burst: int — max burst per IP (default 20)
     """
 
-    def __init__(self, config: dict = None):
+    def __init__(self, config: dict = None, brain=None, context_builder=None):
         super().__init__("webhook", config)
         self._queue: queue.Queue = queue.Queue(maxsize=10_000)
         self._server: HTTPServer | None = None
         self._thread: threading.Thread | None = None
+        self._brain = brain
+        self._context_builder = context_builder
 
     @property
     def source(self) -> str:
@@ -193,9 +315,13 @@ class WebhookAdapter(ChannelAdapter):
         bind = self.config.get("webhook_bind", "0.0.0.0")
         secret = self.config.get("webhook_secret", "")
 
+        rate = self.config.get("webhook_rate_limit", 10.0)
+        burst = self.config.get("webhook_rate_burst", 20)
+
         _WebhookHandler.event_queue = self._queue
         _WebhookHandler.accepted_count = 0
         _WebhookHandler.secret = secret
+        _WebhookHandler.rate_limiter = TokenBucket(rate, burst) if rate > 0 else None
 
         self._server = HTTPServer((bind, port), _WebhookHandler)
         self._thread = threading.Thread(

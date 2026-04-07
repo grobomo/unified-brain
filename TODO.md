@@ -107,12 +107,21 @@ Brain is the constant. Adapters, LLM backend, dispatchers are pluggable per envi
 - [x] T042: Update docs — README reflects 88 tests, webhook adapter, metrics, feedback, active respond; TODO "What exists" updated
 - [x] T043: Docker Compose + monitoring — docker-compose.yaml (brain + Prometheus + Grafana), Grafana dashboard, .env.example
 
+## Phase 12: Multi-Channel Expansion & Hardening
+- [x] T044: Slack channel adapter — poll Slack channels via Web API (Bot token), yield normalized events, BoundedSet dedup
+- [x] T045: Slack respond — ActionExecutor.respond_slack via chat.postMessage, outbox fallback, dispatcher wiring
+- [x] T046: Webhook rate limiting — token bucket per IP, configurable burst/rate, 429 responses
+- [x] T047: Update docs — README and TODO reflect Slack adapter, rate limiting, test count
+- [ ] T048: Synchronous /ask endpoint — POST question, get brain analysis back as HTTP response (conversational mode)
+
 ## Session Handoff
-PRs #1-24 merged. CI green. 40 tasks done (T001-T040), Phase 10 complete.
+PRs #1-27 merged. CI green. 43 tasks done (T001-T043), all phases complete.
 - SERVICE IS LIVE locally: interval=3s, health on :8790, all adapters connected
 - Architecture: pluggable adapters (GitHub, Teams, Webhook), LLM backend (subprocess/api), dispatcher transport (file/SQS), active respond
-- 601+ events in store, 88 tests passing, zero external deps for core
-- Prometheus metrics: /metrics endpoint, 10 metric series
+- 601+ events in store, 111 tests passing, zero external deps for core
+- 4 adapters: GitHub, Teams, Slack, Webhook (rate-limited)
+- Prometheus metrics: /metrics endpoint, 10 metric series, Grafana dashboard
 - Feedback loop: tracks dispatch/respond outcomes, feeds success/failure patterns to brain
 - Webhook adapter: HTTP POST /events, /events/raw (GitHub webhooks), HMAC verification
+- Docker Compose: one-command startup with brain + Prometheus + Grafana
 - Deployment artifacts: Dockerfile, K8s manifests (kustomize), CloudFormation (EC2 spot + SQS)

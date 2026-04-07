@@ -177,6 +177,8 @@ class ActionDispatcher:
         self.github_outbox.mkdir(parents=True, exist_ok=True)
         self.teams_outbox = self.outbox_dir / "teams"
         self.teams_outbox.mkdir(parents=True, exist_ok=True)
+        self.slack_outbox = self.outbox_dir / "slack"
+        self.slack_outbox.mkdir(parents=True, exist_ok=True)
         self.email_outbox = self.outbox_dir / "email"
         self.email_outbox.mkdir(parents=True, exist_ok=True)
 
@@ -232,6 +234,8 @@ class ActionDispatcher:
             return self._respond_github(channel, content, action)
         elif source == "teams":
             return self._respond_teams(channel, content, action)
+        elif source == "slack":
+            return self._respond_slack(channel, content, action)
         else:
             return {"status": "unsupported", "source": source}
 
@@ -242,6 +246,9 @@ class ActionDispatcher:
             return self.executor.respond_github(channel, event_id, content)
         elif source == "teams":
             return self.executor.respond_teams(channel, content)
+        elif source == "slack":
+            thread_ts = action.get("metadata", {}).get("thread_ts", "")
+            return self.executor.respond_slack(channel, content, thread_ts)
         return {"status": "error", "error": f"unsupported source: {source}"}
 
     def _respond_github(self, channel: str, content: str, action: dict) -> dict:
@@ -273,6 +280,22 @@ class ActionDispatcher:
         path = self.teams_outbox / f"{action_id}.json"
         path.write_text(json.dumps(outbox_entry, indent=2))
         return {"status": "queued", "target": f"teams:{channel}", "outbox_path": str(path)}
+
+    def _respond_slack(self, channel: str, content: str, action: dict) -> dict:
+        """Write a Slack action to the outbox."""
+        action_id = f"slack-{int(time.time() * 1000)}"
+        thread_ts = action.get("metadata", {}).get("thread_ts", "")
+        outbox_entry = {
+            "id": action_id,
+            "action": "message",
+            "channel_id": channel,
+            "body": content,
+            "thread_ts": thread_ts,
+            "created_at": time.time(),
+        }
+        path = self.slack_outbox / f"{action_id}.json"
+        path.write_text(json.dumps(outbox_entry, indent=2))
+        return {"status": "queued", "target": f"slack:{channel}", "outbox_path": str(path)}
 
     def _dispatch_to_manager(self, action: dict) -> dict:
         """Send task to ccc-manager via configured transport (file or SQS).
