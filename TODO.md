@@ -112,7 +112,7 @@ Brain is the constant. Adapters, LLM backend, dispatchers are pluggable per envi
 - [x] T045: Slack respond — ActionExecutor.respond_slack via chat.postMessage, outbox fallback, dispatcher wiring
 - [x] T046: Webhook rate limiting — token bucket per IP, configurable burst/rate, 429 responses
 - [x] T047: Update docs — README and TODO reflect Slack adapter, rate limiting, test count
-- [ ] T048: Synchronous /ask endpoint — POST question, get brain analysis back as HTTP response (conversational mode)
+- [x] T048: Synchronous /ask endpoint — POST question, get brain analysis back as HTTP response (conversational mode)
 
 ## Session Handoff
 PRs #1-27 merged. CI green. 43 tasks done (T001-T043), all phases complete.

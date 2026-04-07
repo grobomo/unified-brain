@@ -322,6 +322,8 @@ class WebhookAdapter(ChannelAdapter):
         _WebhookHandler.accepted_count = 0
         _WebhookHandler.secret = secret
         _WebhookHandler.rate_limiter = TokenBucket(rate, burst) if rate > 0 else None
+        _WebhookHandler.brain_analyzer = self._brain
+        _WebhookHandler.context_builder = self._context_builder
 
         self._server = HTTPServer((bind, port), _WebhookHandler)
         self._thread = threading.Thread(
