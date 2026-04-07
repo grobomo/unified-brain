@@ -194,6 +194,8 @@ Interactive: SSH chat, /ask endpoint     No UI: headless execution only
 - [x] T067: Idle loop — IdleTask + IdleLoop with per-task intervals, create_idle_loop factory wires memory compaction, CCC check, reflection, proactive insights. 10 tests.
 - [x] T068: Email adapter — MS Graph inbox poller, HTML body stripping, folder/filter config, BoundedSet dedup. 12 tests.
 - [x] T069: Calendar adapter — MS Graph calendarView poller, normalizes meetings/cancellations/all-day events, attendee tracking, online meeting URLs. 11 tests.
+- [ ] T073: Split test_integration.py — 5500+ lines is unwieldy. Split into per-module test files (test_store.py, test_adapters.py, test_brain.py, etc.)
+- [x] T074: DRY _GraphClient — extracted to shared graph_client.py, removed ~150 duplicate lines from teams.py, email.py, calendar.py.
 - [ ] T070: Port worktree isolation — avoid git conflicts when multiple CCC workers touch same repo. Rewrite in Python for brain's dispatcher. Prevents concurrent edits to same files.
 - [ ] T071: Port write-set validation — auto-serialize tasks with overlapping file targets. Rewrite in Python.
 - [ ] T072: Port fleet heartbeat — peer discovery, stale worker pruning. Rewrite in Python for brain's worker monitoring.
