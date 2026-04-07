@@ -20,6 +20,7 @@ from .reflection import (
     TaskState,
     compute_prediction_accuracy,
 )
+from .utils import read_score_file
 
 logger = logging.getLogger(__name__)
 
@@ -80,19 +81,11 @@ class ReflectionMonitor:
         self.task_store = task_store
         self.file_editor = file_editor
         self.memory = memory
-        self.score_file = Path(score_file or os.path.expanduser(
-            "~/.claude/hooks/reflection-score.json"
-        ))
+        self.score_file = score_file
 
     def read_score(self) -> dict:
         """Read the current reflection-score.json."""
-        if not self.score_file.exists():
-            return {"points": 0, "level": 0, "streak": 0, "interventions": 0}
-        try:
-            return json.loads(self.score_file.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError) as e:
-            logger.warning("Failed to read score file: %s", e)
-            return {"points": 0, "level": 0, "streak": 0, "interventions": 0}
+        return read_score_file(self.score_file)
 
     def check_monitoring_tasks(self) -> list:
         """Check all MONITORING tasks that are due for a checkpoint.

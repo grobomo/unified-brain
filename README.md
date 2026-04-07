@@ -24,15 +24,19 @@ Webhook/API        ──→  Cross-channel Context                      - EC2 (
 ## Features
 
 - **Single process, single DB** — one SQLite+FTS database for all channels
-- **4 channel adapters** — GitHub (gh CLI), Teams (MS Graph), Slack (Web API), Webhooks (HTTP POST)
+- **5 channel adapters** — GitHub (gh CLI), Teams (MS Graph), Slack (Web API), Webhooks (HTTP POST), Hook-runner (JSONL file poller)
 - **Webhook ingestion** — HTTP endpoint accepts events via POST (`/events`, `/events/raw`), HMAC-SHA256 verification, token bucket rate limiting per IP
 - **Cross-channel context** — when analyzing a GitHub issue, the brain sees related Teams/Slack discussions
 - **Three-tier memory** — Tier 1: hot cache (24h events), Tier 2: per-project summaries, Tier 3: global patterns
+- **Interactive chat** — CLI REPL, REST `/chat`, WebSocket `/ws/chat` with persistent per-user conversation sessions
+- **Persona system** — per-user brain identity (name + emoji), self-message filtering in all adapters
+- **Closed-loop self-improvement** — detects patterns in hook-runner events, predicts outcomes before changes, implements fixes, monitors with exponential backoff, rolls back on prediction mismatch
+- **Brain-owned score** — prediction accuracy (70%) + user interrupt rate (30%), rolling tracker, Prometheus metrics
 - **Feedback loop** — tracks dispatch/respond outcomes, feeds success/failure patterns back to the brain prompt
 - **Active respond** — posts GitHub comments, Teams messages, and Slack messages directly via channel APIs, falls back to outbox
 - **Pluggable LLM backend** — subprocess (`claude -p`) for local, Anthropic HTTP API for containers/EC2
 - **Pluggable dispatch transport** — filesystem outbox (local/K8s) or SQS (EC2)
-- **Prometheus metrics** — `/metrics` endpoint with event ingestion rates, brain decisions, dispatch outcomes, cycle duration
+- **LLM observability** — JSONL audit trail (`data/llm.jsonl`), 16 Prometheus metric series
 - **Rule-based fallback** — works without LLM when `claude` CLI is unavailable
 - **Outbox pattern** — actions written as JSON files to channel-specific directories
 - **ccc-manager integration** — dispatches tasks via bridge directory or SQS, polls for results
@@ -99,6 +103,13 @@ adapters:
     webhook_rate_limit: 10.0  # requests/sec per IP (0 to disable)
     webhook_rate_burst: 20    # max burst per IP
     # webhook_secret: hmac-secret  # optional HMAC verification
+  hook_runner:
+    enabled: false
+    hook_log_path: ~/.claude/hooks/hook-log.jsonl
+    reflection_log_path: ~/.claude/hooks/self-reflection.jsonl
+    reflection:
+      hooks_dir: ~/.claude/hooks
+      score_file: ~/.claude/hooks/reflection-score.json
 ```
 
 ## Project Registry
@@ -113,7 +124,7 @@ Secret fields (Teams chat IDs) go in `config/projects.local.json` (gitignored), 
 PYTHONPATH=src python -m pytest tests/ -v
 ```
 
-111 integration tests covering: store, brain, dispatcher, registry, context, memory, outbox, adapters (GitHub, Teams, Slack, Webhook), transport factory, SQS mock, config overlay, env interpolation, active respond, Prometheus metrics, feedback loop, rate limiting.
+252 integration tests covering: store, brain, dispatcher, registry, context, memory, outbox, adapters (GitHub, Teams, Slack, Webhook, Hook-runner), transport factory, SQS mock, config overlay, env interpolation, active respond, Prometheus metrics, feedback loop, rate limiting, interactive chat, persona system, LLM logging, self-message filtering, reflection task lifecycle, file edit/rollback, prediction-outcome scoring, brain score, E2E self-improvement loops.
 
 ## Dependencies
 

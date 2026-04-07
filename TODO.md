@@ -136,11 +136,23 @@ Data files (all in `~/.claude/hooks/`):
 - [x] T055: Reflection implementer — file backup/edit/rollback for hook modules, brain prompt enrichment with prediction history, per-module calibration in Tier 2 memory
 - [x] T056: Brain-owned score — prediction accuracy (70%) + user interrupt rate (30%), rolling tracker, score persistence, Prometheus metrics, reflection-findings.json bridge
 
+## Phase 13b: Loop Detection (from hook-runner T335)
+Source: `_grobomo/hook-runner` session 2026-04-06d.
+Hook-runner T335 added unproductive loop detection to self-reflection prompt (failed commands,
+retry patterns, cherry-pick conflicts, manual patching). Self-reflection flags the pattern, but
+brain should do the deep analysis: identify root cause, suggest systemic fix (automate pipeline),
+track whether the pattern recurs across sessions.
+
+- [ ] T059: Loop pattern analyzer — when reflection adapter receives "unproductive loop" issues, brain should: (1) identify the root cause from command history, (2) suggest an automation fix (e.g. "create a deploy.sh that handles zip+upload+verify"), (3) track recurrence in Tier 3 memory (global patterns). Data source: `reflection-sessions.jsonl` (has failed command counts) + `hook-log.jsonl` (has individual Bash commands).
+
+## Phase 14: Hardening & Cleanup
+- [x] T057: DRY score file reading — extract read_score_file to utils.py, deduplicate from implementer.py + score.py
+- [x] T058: Update README + docs — reflect spec 007 (reflection plugin, 252 tests, brain score)
+
 ## Session Handoff
-PRs #1-32 merged/open. 56 tasks done (T001-T056), spec 007 complete.
+PRs #1-33 merged/open. 58 tasks done (T001-T058), spec 007 complete.
 - 252 tests passing, zero external deps for core
-- Branch 034-T055-reflection-implementer: T054-T056 done (spec 007 complete)
-- T054: reflection.py — ReflectionTask state machine, Prediction, ReflectionTaskStore (SQLite)
-- T055: implementer.py — FileEditor, ReflectionMonitor, prompt enrichment, service loop wiring
-- T056: score.py — BrainScore (prediction accuracy 70% + interrupt rate 30%), reflection-findings.json bridge, 3 Prometheus metrics, 2 E2E tests
-- Spec 007 closed-loop self-improvement is fully implemented. Next: PR, merge, then new spec or operational work.
+- Branch 035-T057-dry-cleanup: T057-T058 done, needs PR
+- Open PRs: #33 (spec 007: T053-T056), needs PR for #035 branch (T057-T058)
+- SHTD workflow state file uses "completed" not "complete" (workflow.js line 269)
+- Next: T059 (loop pattern analyzer from hook-runner T335)
