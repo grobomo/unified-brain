@@ -20,6 +20,7 @@ from .metrics import (
     adapter_errors, brain_errors,
 )
 from .registry import ProjectRegistry
+from .focus_steal import handle_focus_steal
 from .loop_analyzer import LoopAnalyzer
 from .reflection import ReflectionTaskStore
 
@@ -83,6 +84,24 @@ class BrainService:
                                              p.root_cause[:60], p.suggested_fix[:60])
                             except Exception as e:
                                 log.error("[loop] Analysis error: %s", e)
+
+                    # Route system-monitor focus-steal events
+                    for event in events:
+                        if (event.get("source") == "system-monitor"
+                                and event.get("event_type") == "focus_steal"):
+                            try:
+                                action = handle_focus_steal(
+                                    event, memory=self.memory,
+                                    config=self.config.get("focus_steal", {}),
+                                )
+                                if action and action.get("action") == "dispatch":
+                                    self.dispatcher.dispatch(action)
+                                    log.info("[focus] Dispatched fix for %s",
+                                             event.get("metadata", {}).get("source_project", "?"))
+                                elif action:
+                                    log.info("[focus] %s", action.get("content", "")[:100])
+                            except Exception as e:
+                                log.error("[focus] Error handling focus-steal: %s", e)
             except Exception as e:
                 adapter_errors.inc(adapter=adapter.name)
                 log.error(f"[{adapter.name}] Poll error: {e}")

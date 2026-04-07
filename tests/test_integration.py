@@ -4732,5 +4732,194 @@ class TestSystemMonitorAdapter(unittest.TestCase):
         self.assertEqual(len(events2), 0)
 
 
+class TestFocusStealRouter(unittest.TestCase):
+    """Tests for focus-steal action router (T061)."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.projects_root = os.path.join(self.tmpdir, "projects")
+        os.makedirs(os.path.join(self.projects_root, "_grobomo", "test-project"))
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _make_event(self, source_project=None, process_name="python.exe", pid=356):
+        return {
+            "id": "sysmon:test-event",
+            "source": "system-monitor",
+            "channel": "focus-events",
+            "event_type": "focus_steal",
+            "author": process_name,
+            "title": f"focus_steal: {process_name}",
+            "body": f"Process: {process_name}",
+            "created_at": 1712448000.0,
+            "metadata": {
+                "classification": "SAFE",
+                "source_project": source_project,
+                "process_name": process_name,
+                "pid": pid,
+                "exe_path": f"C:\\test\\{process_name}",
+                "command_line": f"{process_name} --test",
+                "parent_chain": f"{process_name}({pid}) -> bash.exe(100)",
+                "original_file": "test-event.json",
+            },
+        }
+
+    def test_known_project_writes_todo(self):
+        """Focus-steal with source_project writes TODO to that project."""
+        from unified_brain.focus_steal import handle_focus_steal
+
+        event = self._make_event(source_project="_grobomo/test-project")
+        config = {"projects_root": self.projects_root}
+
+        result = handle_focus_steal(event, config=config)
+
+        self.assertIsNotNone(result)
+        todo_path = os.path.join(
+            self.projects_root, "_grobomo", "test-project", "TODO.md"
+        )
+        self.assertTrue(os.path.exists(todo_path))
+        with open(todo_path) as f:
+            content = f.read()
+        self.assertIn("Focus-Steal Fixes", content)
+        self.assertIn("python.exe", content)
+        self.assertIn("pid 356", content)
+
+    def test_known_project_includes_fix_suggestion(self):
+        """TODO entry includes process-specific fix suggestion."""
+        from unified_brain.focus_steal import handle_focus_steal
+
+        event = self._make_event(source_project="_grobomo/test-project",
+                                 process_name="powershell.exe")
+        config = {"projects_root": self.projects_root}
+
+        handle_focus_steal(event, config=config)
+
+        todo_path = os.path.join(
+            self.projects_root, "_grobomo", "test-project", "TODO.md"
+        )
+        with open(todo_path) as f:
+            content = f.read()
+        self.assertIn("-WindowStyle Hidden", content)
+
+    def test_known_project_with_dispatch_config(self):
+        """With context_reset_script configured, returns dispatch action."""
+        from unified_brain.focus_steal import handle_focus_steal
+
+        event = self._make_event(source_project="_grobomo/test-project")
+        config = {
+            "projects_root": self.projects_root,
+            "context_reset_script": "/path/to/context_reset.py",
+        }
+
+        result = handle_focus_steal(event, config=config)
+
+        self.assertEqual(result["action"], "dispatch")
+        self.assertIn("context_reset.py", result["metadata"]["command"])
+
+    def test_known_project_without_dispatch_returns_log(self):
+        """Without context_reset_script, returns log action."""
+        from unified_brain.focus_steal import handle_focus_steal
+
+        event = self._make_event(source_project="_grobomo/test-project")
+        config = {"projects_root": self.projects_root}
+
+        result = handle_focus_steal(event, config=config)
+
+        self.assertEqual(result["action"], "log")
+        self.assertIn("no dispatch configured", result["content"])
+
+    def test_unknown_project_returns_log(self):
+        """Focus-steal with unknown source_project logs only."""
+        from unified_brain.focus_steal import handle_focus_steal
+
+        event = self._make_event(source_project=None)
+        result = handle_focus_steal(event, config={})
+
+        self.assertEqual(result["action"], "log")
+        self.assertIn("System noise", result["content"])
+
+    def test_unknown_project_tracks_noise_in_memory(self):
+        """Unknown source events are tracked in Tier 2 memory."""
+        from unified_brain.focus_steal import handle_focus_steal
+        from unittest.mock import MagicMock
+
+        memory = MagicMock()
+        memory.get_project_memory.return_value = {}
+
+        event = self._make_event(source_project=None, process_name="az.cmd")
+        handle_focus_steal(event, memory=memory, config={})
+
+        memory.set_project_memory.assert_called_once()
+        call_args = memory.set_project_memory.call_args
+        self.assertEqual(call_args[0][0], "system-monitor")
+        self.assertEqual(call_args[0][1], "noise_tracking")
+        noise = call_args[0][2]
+        self.assertEqual(noise["total_count"], 1)
+        self.assertIn("az.cmd", noise["processes"])
+
+    def test_nonexistent_project_dir_returns_log(self):
+        """Source project with non-existent directory returns log action."""
+        from unified_brain.focus_steal import handle_focus_steal
+
+        event = self._make_event(source_project="_grobomo/nonexistent-project")
+        config = {"projects_root": self.projects_root}
+
+        result = handle_focus_steal(event, config=config)
+
+        self.assertEqual(result["action"], "log")
+        self.assertIn("not found", result["content"])
+
+    def test_duplicate_todo_not_appended(self):
+        """Same focus-steal event doesn't create duplicate TODO entries."""
+        from unified_brain.focus_steal import handle_focus_steal
+
+        event = self._make_event(source_project="_grobomo/test-project")
+        config = {"projects_root": self.projects_root}
+
+        handle_focus_steal(event, config=config)
+        handle_focus_steal(event, config=config)
+
+        todo_path = os.path.join(
+            self.projects_root, "_grobomo", "test-project", "TODO.md"
+        )
+        with open(todo_path) as f:
+            content = f.read()
+        # Should appear only once
+        count = content.count("pid 356")
+        self.assertEqual(count, 1)
+
+    def test_appends_to_existing_section(self):
+        """Second unique event appends to existing Focus-Steal section."""
+        from unified_brain.focus_steal import handle_focus_steal
+
+        config = {"projects_root": self.projects_root}
+
+        event1 = self._make_event(source_project="_grobomo/test-project", pid=100)
+        event2 = self._make_event(source_project="_grobomo/test-project", pid=200)
+
+        handle_focus_steal(event1, config=config)
+        handle_focus_steal(event2, config=config)
+
+        todo_path = os.path.join(
+            self.projects_root, "_grobomo", "test-project", "TODO.md"
+        )
+        with open(todo_path) as f:
+            content = f.read()
+        # Section header appears once, both entries present
+        self.assertEqual(content.count("## Focus-Steal Fixes"), 1)
+        self.assertIn("pid 100", content)
+        self.assertIn("pid 200", content)
+
+    def test_fix_suggestions_per_process(self):
+        """Fix suggestions are process-specific."""
+        from unified_brain.focus_steal import _get_fix_suggestion
+
+        self.assertIn("CREATE_NO_WINDOW", _get_fix_suggestion("python.exe", ""))
+        self.assertIn("WindowStyle", _get_fix_suggestion("powershell.exe", ""))
+        self.assertIn("windowsHide", _get_fix_suggestion("node.exe", ""))
+        self.assertIn("Investigate", _get_fix_suggestion("unknown.exe", ""))
+
+
 if __name__ == "__main__":
     unittest.main()
