@@ -24,6 +24,50 @@ from .base import ChannelAdapter, parse_timestamp
 logger = logging.getLogger(__name__)
 
 
+class TokenBucket:
+    """Token bucket rate limiter — per-key (e.g. per IP).
+
+    Args:
+        rate: tokens added per second
+        burst: maximum tokens (bucket capacity)
+    """
+
+    def __init__(self, rate: float = 10.0, burst: int = 20):
+        self.rate = rate
+        self.burst = burst
+        self._buckets: dict[str, list] = {}  # key -> [tokens, last_refill_time]
+        self._lock = threading.Lock()
+
+    def allow(self, key: str) -> bool:
+        """Check if a request from `key` is allowed. Consumes one token if so."""
+        now = time.monotonic()
+        with self._lock:
+            if key not in self._buckets:
+                self._buckets[key] = [self.burst - 1, now]
+                return True
+
+            tokens, last = self._buckets[key]
+            # Refill tokens based on elapsed time
+            elapsed = now - last
+            tokens = min(self.burst, tokens + elapsed * self.rate)
+            self._buckets[key][1] = now
+
+            if tokens >= 1:
+                self._buckets[key][0] = tokens - 1
+                return True
+            else:
+                self._buckets[key][0] = tokens
+                return False
+
+    def cleanup(self, max_age: float = 3600):
+        """Remove stale entries older than max_age seconds."""
+        now = time.monotonic()
+        with self._lock:
+            stale = [k for k, (_, t) in self._buckets.items() if now - t > max_age]
+            for k in stale:
+                del self._buckets[k]
+
+
 class _WebhookHandler(BaseHTTPRequestHandler):
     """HTTP handler for incoming webhook events."""
 
@@ -31,9 +75,24 @@ class _WebhookHandler(BaseHTTPRequestHandler):
     event_queue: queue.Queue = None
     accepted_count: int = 0
     secret: str = ""
+    rate_limiter: TokenBucket | None = None
     _lock = threading.Lock()
 
+    def _get_client_ip(self) -> str:
+        """Extract client IP, respecting X-Forwarded-For behind a proxy."""
+        forwarded = self.headers.get("X-Forwarded-For", "")
+        if forwarded:
+            return forwarded.split(",")[0].strip()
+        return self.client_address[0]
+
     def do_POST(self):
+        # Rate limiting
+        if self.rate_limiter:
+            client_ip = self._get_client_ip()
+            if not self.rate_limiter.allow(client_ip):
+                self._respond(429, {"error": "Rate limit exceeded"})
+                return
+
         content_length = int(self.headers.get("Content-Length", 0))
         if content_length > 1_000_000:  # 1MB limit
             self._respond(413, {"error": "Payload too large"})
@@ -165,6 +224,8 @@ class WebhookAdapter(ChannelAdapter):
         webhook_port: int — port to listen on (default 8791)
         webhook_secret: str — HMAC secret for signature verification (optional)
         webhook_bind: str — bind address (default 0.0.0.0)
+        webhook_rate_limit: float — requests/sec per IP (default 10.0, 0 to disable)
+        webhook_rate_burst: int — max burst per IP (default 20)
     """
 
     def __init__(self, config: dict = None):
@@ -193,9 +254,13 @@ class WebhookAdapter(ChannelAdapter):
         bind = self.config.get("webhook_bind", "0.0.0.0")
         secret = self.config.get("webhook_secret", "")
 
+        rate = self.config.get("webhook_rate_limit", 10.0)
+        burst = self.config.get("webhook_rate_burst", 20)
+
         _WebhookHandler.event_queue = self._queue
         _WebhookHandler.accepted_count = 0
         _WebhookHandler.secret = secret
+        _WebhookHandler.rate_limiter = TokenBucket(rate, burst) if rate > 0 else None
 
         self._server = HTTPServer((bind, port), _WebhookHandler)
         self._thread = threading.Thread(

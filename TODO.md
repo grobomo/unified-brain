@@ -110,7 +110,7 @@ Brain is the constant. Adapters, LLM backend, dispatchers are pluggable per envi
 ## Phase 12: Multi-Channel Expansion & Hardening
 - [x] T044: Slack channel adapter — poll Slack channels via Web API (Bot token), yield normalized events, BoundedSet dedup
 - [x] T045: Slack respond — ActionExecutor.respond_slack via chat.postMessage, outbox fallback, dispatcher wiring
-- [ ] T046: Webhook rate limiting — token bucket per IP, configurable burst/rate, 429 responses
+- [x] T046: Webhook rate limiting — token bucket per IP, configurable burst/rate, 429 responses
 - [ ] T047: Update docs — README and TODO reflect Slack adapter, rate limiting, test count
 
 ## Session Handoff

@@ -1299,6 +1299,115 @@ class TestWebhookAdapter(unittest.TestCase):
         self.assertTrue(events[0]["id"].startswith("wh:"))
 
 
+class TestTokenBucket(unittest.TestCase):
+    """Tests for webhook rate limiter (T046)."""
+
+    def test_allows_within_burst(self):
+        from unified_brain.adapters.webhook import TokenBucket
+        bucket = TokenBucket(rate=10, burst=5)
+        for _ in range(5):
+            self.assertTrue(bucket.allow("ip1"))
+
+    def test_rejects_after_burst_exhausted(self):
+        from unified_brain.adapters.webhook import TokenBucket
+        bucket = TokenBucket(rate=0.001, burst=3)  # very slow refill
+        for _ in range(3):
+            bucket.allow("ip1")
+        self.assertFalse(bucket.allow("ip1"))
+
+    def test_separate_keys_independent(self):
+        from unified_brain.adapters.webhook import TokenBucket
+        bucket = TokenBucket(rate=0.001, burst=2)
+        bucket.allow("ip1")
+        bucket.allow("ip1")
+        self.assertFalse(bucket.allow("ip1"))
+        # ip2 should still have its own bucket
+        self.assertTrue(bucket.allow("ip2"))
+
+    def test_refill_over_time(self):
+        from unified_brain.adapters.webhook import TokenBucket
+        bucket = TokenBucket(rate=1000, burst=5)  # fast refill
+        for _ in range(5):
+            bucket.allow("ip1")
+        # With rate=1000/s, even a tiny delay should refill at least 1 token
+        time.sleep(0.01)
+        self.assertTrue(bucket.allow("ip1"))
+
+    def test_cleanup_removes_stale(self):
+        from unified_brain.adapters.webhook import TokenBucket
+        bucket = TokenBucket(rate=10, burst=5)
+        bucket.allow("ip1")
+        bucket.allow("ip2")
+        # Force stale by setting last access far in the past
+        with bucket._lock:
+            bucket._buckets["ip1"][1] = time.monotonic() - 7200
+        bucket.cleanup(max_age=3600)
+        self.assertNotIn("ip1", bucket._buckets)
+        self.assertIn("ip2", bucket._buckets)
+
+
+class TestWebhookRateLimit(unittest.TestCase):
+    """Tests for webhook endpoint rate limiting (T046)."""
+
+    def setUp(self):
+        import socket
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.bind(("", 0))
+            self.port = s.getsockname()[1]
+
+    def _post(self, port, path, data):
+        from urllib.request import urlopen, Request
+        body = json.dumps(data).encode()
+        req = Request(f"http://127.0.0.1:{port}{path}", data=body, method="POST")
+        req.add_header("Content-Type", "application/json")
+        try:
+            return urlopen(req, timeout=5)
+        except Exception as e:
+            return e
+
+    def test_rate_limit_returns_429(self):
+        """Requests beyond burst limit get 429."""
+        adapter = WebhookAdapter({
+            "webhook_port": self.port,
+            "webhook_bind": "127.0.0.1",
+            "webhook_rate_limit": 0.001,  # very slow refill
+            "webhook_rate_burst": 2,
+        })
+        asyncio.run(adapter.start())
+        try:
+            event = {"id": "rl-1", "source": "test", "title": "t"}
+            # First 2 should succeed (burst=2)
+            resp1 = self._post(self.port, "/events", event)
+            self.assertEqual(resp1.status, 202)
+            resp2 = self._post(self.port, "/events", {"id": "rl-2", "source": "test", "title": "t"})
+            self.assertEqual(resp2.status, 202)
+            # Third should be rate-limited
+            resp3 = self._post(self.port, "/events", {"id": "rl-3", "source": "test", "title": "t"})
+            # urlopen raises HTTPError for 429
+            from urllib.error import HTTPError
+            self.assertIsInstance(resp3, HTTPError)
+            self.assertEqual(resp3.code, 429)
+        finally:
+            asyncio.run(adapter.stop())
+
+    def test_rate_limit_disabled_when_zero(self):
+        """Rate limit=0 disables rate limiting."""
+        adapter = WebhookAdapter({
+            "webhook_port": self.port,
+            "webhook_bind": "127.0.0.1",
+            "webhook_rate_limit": 0,
+        })
+        asyncio.run(adapter.start())
+        try:
+            # Should accept many requests without 429
+            for i in range(10):
+                resp = self._post(self.port, "/events",
+                                  {"id": f"nolimit-{i}", "source": "test", "title": "t"})
+                self.assertEqual(resp.status, 202)
+        finally:
+            asyncio.run(adapter.stop())
+
+
 class TestMetrics(unittest.TestCase):
     """Tests for Prometheus metrics module (T038)."""
 
