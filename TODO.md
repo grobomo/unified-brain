@@ -136,6 +136,10 @@ Data files (all in `~/.claude/hooks/`):
 - [x] T055: Reflection implementer — file backup/edit/rollback for hook modules, brain prompt enrichment with prediction history, per-module calibration in Tier 2 memory
 - [x] T056: Brain-owned score — prediction accuracy (70%) + user interrupt rate (30%), rolling tracker, score persistence, Prometheus metrics, reflection-findings.json bridge
 
+## Phase 14: Hardening & Cleanup
+- [ ] T057: DRY score file reading — extract read_score_file to utils.py, deduplicate from implementer.py + score.py
+- [ ] T058: Update README + docs — reflect spec 007 (reflection plugin, 252 tests, brain score)
+
 ## Session Handoff
 PRs #1-32 merged/open. 56 tasks done (T001-T056), spec 007 complete.
 - 252 tests passing, zero external deps for core
