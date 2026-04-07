@@ -113,15 +113,34 @@ Brain is the constant. Adapters, LLM backend, dispatchers are pluggable per envi
 - [x] T046: Webhook rate limiting — token bucket per IP, configurable burst/rate, 429 responses
 - [x] T047: Update docs — README and TODO reflect Slack adapter, rate limiting, test count
 - [x] T048: Synchronous /ask endpoint — POST question, get brain analysis back as HTTP response (conversational mode)
+- [x] T049: Interactive chat mode — persistent brain session with conversation history, CLI REPL + WebSocket endpoint
+- [x] T050: Persona system — per-user brain identity (name + emoji), self-message filtering
+- [x] T051: LLM call logging and metrics — JSONL audit trail, Prometheus counters, concurrency gauge
+- [x] T052: Adapter self-message filtering — skip brain's own messages in Teams/Slack/GitHub
+
+## Phase 13: Self-Reflection Plugin
+Source: `_grobomo/hook-runner` (v2.10.0) — T331 in hook-runner/TODO.md depends on these.
+Hook-runner has a self-reflection system that calls `claude -p` on every Stop event to review
+gate decisions. It works but has no persistent memory — each call is stateless. The three-tier
+memory in unified-brain solves this. Hook-runner's related TODOs: T330 (scope enforcement),
+T331 (migrate to brain plugin), T332 (lightweight session summaries as interim).
+
+Data files (all in `~/.claude/hooks/`):
+- `hook-log.jsonl` — every hook module invocation (event, module, result, timing)
+- `self-reflection.jsonl` — LLM analysis results (verdict, issues, todos)
+- `reflection-score.json` — gamified score (points, level, streak, intervention counts)
+- `reflection-claude-log.jsonl` — full claude -p audit (prompt, response, timing)
+
+- [x] T053: Hook-runner channel adapter — ingests hook-log.jsonl + self-reflection.jsonl as events
+- [x] T054: ReflectionTask lifecycle — state machine (detect → predict → implement → monitor → verify → close), exponential backoff (30s→30m), rollback on prediction mismatch, max 3 attempts
+- [x] T055: Reflection implementer — file backup/edit/rollback for hook modules, brain prompt enrichment with prediction history, per-module calibration in Tier 2 memory
+- [x] T056: Brain-owned score — prediction accuracy (70%) + user interrupt rate (30%), rolling tracker, score persistence, Prometheus metrics, reflection-findings.json bridge
 
 ## Session Handoff
-PRs #1-27 merged. CI green. 43 tasks done (T001-T043), all phases complete.
-- SERVICE IS LIVE locally: interval=3s, health on :8790, all adapters connected
-- Architecture: pluggable adapters (GitHub, Teams, Webhook), LLM backend (subprocess/api), dispatcher transport (file/SQS), active respond
-- 601+ events in store, 111 tests passing, zero external deps for core
-- 4 adapters: GitHub, Teams, Slack, Webhook (rate-limited)
-- Prometheus metrics: /metrics endpoint, 10 metric series, Grafana dashboard
-- Feedback loop: tracks dispatch/respond outcomes, feeds success/failure patterns to brain
-- Webhook adapter: HTTP POST /events, /events/raw (GitHub webhooks), HMAC verification
-- Docker Compose: one-command startup with brain + Prometheus + Grafana
-- Deployment artifacts: Dockerfile, K8s manifests (kustomize), CloudFormation (EC2 spot + SQS)
+PRs #1-32 merged/open. 56 tasks done (T001-T056), spec 007 complete.
+- 252 tests passing, zero external deps for core
+- Branch 034-T055-reflection-implementer: T054-T056 done (spec 007 complete)
+- T054: reflection.py — ReflectionTask state machine, Prediction, ReflectionTaskStore (SQLite)
+- T055: implementer.py — FileEditor, ReflectionMonitor, prompt enrichment, service loop wiring
+- T056: score.py — BrainScore (prediction accuracy 70% + interrupt rate 30%), reflection-findings.json bridge, 3 Prometheus metrics, 2 E2E tests
+- Spec 007 closed-loop self-improvement is fully implemented. Next: PR, merge, then new spec or operational work.

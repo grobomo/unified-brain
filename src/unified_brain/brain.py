@@ -17,6 +17,36 @@ from urllib.request import urlopen, Request
 from urllib.error import URLError, HTTPError
 
 logger = logging.getLogger(__name__)
+llm_logger = logging.getLogger("unified-brain.llm")
+
+
+def _log_llm_call(backend_type: str, prompt: str, response: str | None,
+                   elapsed: float, success: bool):
+    """Log an LLM call to the dedicated LLM logger as JSONL + update metrics."""
+    from .metrics import llm_calls_total, llm_active, llm_duration
+
+    outcome = "success" if success else "failure"
+    llm_calls_total.inc(backend=backend_type, outcome=outcome)
+    llm_active.inc(-1, backend=backend_type)
+    llm_duration.set(elapsed, backend=backend_type)
+
+    record = {
+        "ts": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+        "backend": backend_type,
+        "prompt_len": len(prompt),
+        "prompt_first_200": prompt[:200],
+        "response_len": len(response) if response else 0,
+        "response": response[:2000] if response else None,
+        "elapsed_s": round(elapsed, 2),
+        "success": success,
+    }
+    llm_logger.info(json.dumps(record, ensure_ascii=False))
+
+
+def _mark_llm_start(backend_type: str):
+    """Mark the start of an LLM call for concurrency tracking."""
+    from .metrics import llm_active
+    llm_active.inc(1, backend=backend_type)
 
 # Action types the brain can produce
 RESPOND = "respond"    # Reply in the originating channel (GitHub comment, Teams message)
@@ -42,6 +72,8 @@ class SubprocessBackend(LLMBackend):
         self.timeout = timeout
 
     def call(self, prompt: str) -> str | None:
+        _mark_llm_start("subprocess")
+        t0 = time.monotonic()
         try:
             env = {**os.environ, "CLAUDE_CODE_ENTRYPOINT": "unified-brain"}
             result = subprocess.run(
@@ -50,9 +82,12 @@ class SubprocessBackend(LLMBackend):
                 env=env,
             )
             if result.returncode == 0:
-                return result.stdout.strip()
+                response = result.stdout.strip()
+                _log_llm_call("subprocess", prompt, response, time.monotonic() - t0, True)
+                return response
         except (subprocess.TimeoutExpired, FileNotFoundError):
             pass
+        _log_llm_call("subprocess", prompt, None, time.monotonic() - t0, False)
         return None
 
 
@@ -69,6 +104,7 @@ class APIBackend(LLMBackend):
         self.timeout = timeout
 
     def call(self, prompt: str) -> str | None:
+        _mark_llm_start("api")
         body = json.dumps({
             "model": self.model,
             "max_tokens": self.max_tokens,
@@ -80,14 +116,18 @@ class APIBackend(LLMBackend):
         req.add_header("x-api-key", self.api_key)
         req.add_header("anthropic-version", "2023-06-01")
 
+        t0 = time.monotonic()
         try:
             with urlopen(req, timeout=self.timeout) as resp:
                 data = json.loads(resp.read())
                 content = data.get("content", [])
                 if content and content[0].get("type") == "text":
-                    return content[0]["text"].strip()
+                    response = content[0]["text"].strip()
+                    _log_llm_call("api", prompt, response, time.monotonic() - t0, True)
+                    return response
         except (URLError, HTTPError, json.JSONDecodeError, KeyError) as e:
             logger.error(f"Anthropic API error: {e}")
+        _log_llm_call("api", prompt, None, time.monotonic() - t0, False)
         return None
 
 

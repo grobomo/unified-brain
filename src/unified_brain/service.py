@@ -20,6 +20,7 @@ from .metrics import (
     adapter_errors, brain_errors,
 )
 from .registry import ProjectRegistry
+from .reflection import ReflectionTaskStore
 
 log = logging.getLogger("unified-brain")
 
@@ -35,6 +36,8 @@ class BrainService:
         self.registry = ProjectRegistry(self.config.get("registry_path", "config/projects.yaml"))
         self.memory = MemoryManager(self.store.conn, self.config.get("memory", {}))
         self.feedback = FeedbackStore(self.store.conn)
+        self.reflection_store = ReflectionTaskStore(self.store.conn)
+        self.reflection_monitor = None  # Set by runner if reflection is enabled
         self.context_builder = ContextBuilder(
             self.store, self.registry, self.config.get("context", {}),
             memory=self.memory, feedback=self.feedback,
@@ -117,7 +120,17 @@ class BrainService:
             log.info(f"[result] Task {task_id}: {'success' if success else 'failed'}")
             self._relay_result(result)
 
-        # 4. Periodic memory compaction
+        # 4. Check reflection monitoring tasks (closed-loop self-improvement)
+        if self.reflection_monitor:
+            try:
+                results = self.reflection_monitor.check_monitoring_tasks()
+                for task, action in results:
+                    log.info("[reflection] Task %s: %s (attempt %d)",
+                             task.task_id, action, task.attempts)
+            except Exception as e:
+                log.error("[reflection] Monitor error: %s", e)
+
+        # 5. Periodic memory compaction
         self._cycle_count += 1
         if self._cycle_count % self._compact_interval == 0:
             try:

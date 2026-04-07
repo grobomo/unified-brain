@@ -34,10 +34,13 @@ def _gh_api(endpoint: str, per_page: int = 30) -> list | dict:
 class GitHubAdapter(ChannelAdapter):
     """Polls GitHub repos via `gh` CLI and yields normalized events."""
 
-    def __init__(self, config: dict = None):
+    def __init__(self, config: dict = None, persona_registry=None):
         super().__init__("github", config)
         self.repos = self.config.get("repos", [])
         self._seen_ids = BoundedSet()
+        self._persona_registry = persona_registry
+        # GitHub login used by the brain for posting comments (skip own events)
+        self._bot_login = self.config.get("bot_login", "")
 
     @property
     def source(self) -> str:
@@ -131,6 +134,11 @@ class GitHubAdapter(ChannelAdapter):
         for item in items:
             eid = f"gh:event:{item.get('id', '')}"
             if eid in self._seen_ids:
+                continue
+            # Skip events from the brain's own GitHub account
+            actor = (item.get("actor") or {}).get("login", "")
+            if self._bot_login and actor == self._bot_login:
+                self._seen_ids.add(eid)
                 continue
             self._seen_ids.add(eid)
             event_type = item.get("type", "unknown").replace("Event", "").lower()

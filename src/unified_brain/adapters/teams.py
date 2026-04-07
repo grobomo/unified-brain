@@ -107,12 +107,13 @@ class _GraphClient:
 class TeamsAdapter(ChannelAdapter):
     """Polls Teams chats via MS Graph API and yields normalized events."""
 
-    def __init__(self, config: dict = None):
+    def __init__(self, config: dict = None, persona_registry=None):
         super().__init__("teams", config)
         self.chat_ids = self.config.get("chat_ids", [])
         self.poll_count = self.config.get("messages_per_poll", 20)
         self._client = None
         self._seen_ids = BoundedSet()
+        self._persona_registry = persona_registry
 
     @property
     def source(self) -> str:
@@ -170,6 +171,11 @@ class TeamsAdapter(ChannelAdapter):
                     # Strip HTML tags (simple approach)
                     text = re.sub(r'<[^>]+>', '', body_content).strip()
                     if not text:
+                        continue
+
+                    # Skip brain's own messages (identified by persona emoji prefix)
+                    if self._persona_registry and self._persona_registry.is_own_message(text):
+                        self._seen_ids.add(mid)
                         continue
 
                     self._seen_ids.add(mid)
