@@ -9,6 +9,9 @@ Endpoints:
   GET  /events/stats — queue depth and accepted count
 
 Events are queued in-memory and drained each poll cycle by the service.
+
+The /ask endpoint provides synchronous brain analysis: post a question,
+get the brain's decision back as the HTTP response (conversational mode).
 """
 
 import hashlib
@@ -76,6 +79,8 @@ class _WebhookHandler(BaseHTTPRequestHandler):
     accepted_count: int = 0
     secret: str = ""
     rate_limiter: TokenBucket | None = None
+    brain_analyzer = None  # set by WebhookAdapter for /ask endpoint
+    context_builder = None  # set by WebhookAdapter for /ask endpoint
     _lock = threading.Lock()
 
     def _get_client_ip(self) -> str:
