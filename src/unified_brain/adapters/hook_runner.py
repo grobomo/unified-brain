@@ -19,6 +19,7 @@ import os
 import time
 from pathlib import Path
 
+from ..utils import DEFAULT_HOOKS_DIR
 from .base import ChannelAdapter, parse_timestamp
 
 logger = logging.getLogger(__name__)
@@ -160,7 +161,7 @@ class HookRunnerAdapter(ChannelAdapter):
 
     def __init__(self, config: dict = None):
         super().__init__("hook-runner", config)
-        hooks_dir = os.path.expanduser("~/.claude/hooks")
+        hooks_dir = DEFAULT_HOOKS_DIR
         self._hook_log = _FilePoller(
             self.config.get("hook_log_path", os.path.join(hooks_dir, "hook-log.jsonl"))
         )

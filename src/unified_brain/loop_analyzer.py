@@ -15,7 +15,6 @@ import logging
 import os
 import re
 import time
-from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -264,9 +263,10 @@ class LoopAnalyzer:
     """
 
     def __init__(self, memory=None, hook_log_path: str = ""):
+        from .utils import DEFAULT_HOOKS_DIR
         self.memory = memory
         self.hook_log_path = hook_log_path or os.path.join(
-            os.path.expanduser("~/.claude/hooks"), "hook-log.jsonl"
+            DEFAULT_HOOKS_DIR, "hook-log.jsonl"
         )
         self._patterns: list[LoopPattern] = []
 
