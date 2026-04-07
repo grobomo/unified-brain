@@ -118,7 +118,10 @@ class _WebhookHandler(BaseHTTPRequestHandler):
             self._respond(400, {"error": "Invalid JSON"})
             return
 
-        if self.path == "/events":
+        if self.path == "/ask":
+            self._handle_ask(payload)
+            return
+        elif self.path == "/events":
             events = self._normalize_events(payload)
         elif self.path == "/events/raw":
             events = self._normalize_raw(payload)
@@ -144,6 +147,57 @@ class _WebhookHandler(BaseHTTPRequestHandler):
             self._respond(200, stats)
         else:
             self._respond(404, {"error": "Not found"})
+
+    def _handle_ask(self, payload: dict):
+        """Synchronous brain analysis — runs the brain and returns the response.
+
+        POST /ask with:
+            {"question": "What should we prioritize?", "source": "user", "author": "joel"}
+
+        Returns the brain's action decision as JSON.
+        """
+        if not self.brain_analyzer:
+            self._respond(503, {"error": "Brain analyzer not available"})
+            return
+
+        question = payload.get("question", payload.get("body", payload.get("text", "")))
+        if not question:
+            self._respond(400, {"error": "Missing 'question' field"})
+            return
+
+        # Build a synthetic event from the question
+        event = {
+            "id": f"ask:{hashlib.sha256(question.encode()).hexdigest()[:12]}",
+            "source": payload.get("source", "ask"),
+            "channel": payload.get("channel", "console"),
+            "event_type": "question",
+            "author": payload.get("author", "user"),
+            "title": question[:100],
+            "body": question,
+            "created_at": time.time(),
+            "metadata": {},
+        }
+
+        # Build context if available
+        context = {}
+        if self.context_builder:
+            try:
+                context = self.context_builder.build(event)
+            except Exception as e:
+                logger.warning(f"/ask context build failed: {e}")
+
+        # Run the brain synchronously
+        try:
+            action = self.brain_analyzer.analyze(event, context)
+            self._respond(200, {
+                "action": action.get("action", "log"),
+                "content": action.get("content", ""),
+                "reason": action.get("reason", ""),
+                "event_id": event["id"],
+            })
+        except Exception as e:
+            logger.error(f"/ask brain error: {e}")
+            self._respond(500, {"error": f"Brain analysis failed: {e}"})
 
     def _normalize_events(self, payload) -> list[dict]:
         """Normalize a JSON payload into event dicts.
@@ -233,11 +287,13 @@ class WebhookAdapter(ChannelAdapter):
         webhook_rate_burst: int — max burst per IP (default 20)
     """
 
-    def __init__(self, config: dict = None):
+    def __init__(self, config: dict = None, brain=None, context_builder=None):
         super().__init__("webhook", config)
         self._queue: queue.Queue = queue.Queue(maxsize=10_000)
         self._server: HTTPServer | None = None
         self._thread: threading.Thread | None = None
+        self._brain = brain
+        self._context_builder = context_builder
 
     @property
     def source(self) -> str:
