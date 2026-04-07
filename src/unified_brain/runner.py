@@ -30,16 +30,14 @@ logger = logging.getLogger("unified-brain")
 
 
 class _HealthHandler(BaseHTTPRequestHandler):
-    """Minimal health check endpoint with Prometheus metrics."""
+    """Minimal health check endpoint with Prometheus metrics and /ask."""
     stats = {}
+    service = None  # Set by run_service before starting
 
     def do_GET(self):
         if self.path in ("/healthz", "/stats"):
             data = json.dumps(self.stats, indent=2, default=str)
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            self.wfile.write(data.encode())
+            self._json_response(200, data.encode())
         elif self.path == "/metrics":
             from .metrics import registry
             body = registry.expose()
@@ -50,6 +48,77 @@ class _HealthHandler(BaseHTTPRequestHandler):
         else:
             self.send_response(404)
             self.end_headers()
+
+    def do_POST(self):
+        if self.path == "/ask":
+            self._handle_ask()
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+    def _handle_ask(self):
+        """Synchronous /ask endpoint — submit a question, get brain analysis back."""
+        if not self.service:
+            self._json_response(503, json.dumps({"error": "Service not ready"}).encode())
+            return
+
+        content_length = int(self.headers.get("Content-Length", 0))
+        if content_length > 100_000:
+            self._json_response(413, json.dumps({"error": "Payload too large"}).encode())
+            return
+
+        try:
+            body = json.loads(self.rfile.read(content_length))
+        except (json.JSONDecodeError, ValueError):
+            self._json_response(400, json.dumps({"error": "Invalid JSON"}).encode())
+            return
+
+        question = body.get("question", body.get("q", ""))
+        if not question:
+            self._json_response(400, json.dumps({"error": "Missing 'question' field"}).encode())
+            return
+
+        source = body.get("source", "api")
+        channel = body.get("channel", "ask")
+
+        # Build a synthetic event from the question
+        event = {
+            "id": f"ask:{int(time.time() * 1000)}",
+            "source": source,
+            "channel": channel,
+            "event_type": "question",
+            "author": body.get("author", "api-user"),
+            "title": question[:100],
+            "body": question,
+            "created_at": time.time(),
+            "metadata": body.get("metadata", {}),
+        }
+
+        # Build context and analyze
+        try:
+            context = self.service.context_builder.build(event)
+            action = self.service.brain.analyze(event, context)
+            response = {
+                "action": action.get("action", "log"),
+                "content": action.get("content", ""),
+                "reason": action.get("reason", ""),
+                "event_id": event["id"],
+                "context_sources": {
+                    "same_channel": len(context.get("same_channel", [])),
+                    "related_channels": len(context.get("related_channels", [])),
+                    "author_activity": len(context.get("author_activity", [])),
+                },
+            }
+            self._json_response(200, json.dumps(response, indent=2).encode())
+        except Exception as e:
+            logger.error(f"/ask error: {e}")
+            self._json_response(500, json.dumps({"error": str(e)}).encode())
+
+    def _json_response(self, code: int, body: bytes):
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+        self.wfile.write(body)
 
     def log_message(self, *args):
         pass  # suppress access logs
@@ -141,6 +210,7 @@ async def run_service(config: dict, once: bool = False,
         logger.info(f"Health endpoint on :{health_port}")
 
     service = BrainService(config)
+    _HealthHandler.service = service
 
     # Register adapters based on config
     adapters_config = config.get("adapters", {})
@@ -155,7 +225,11 @@ async def run_service(config: dict, once: bool = False,
         service.add_adapter(SlackAdapter(slack_config))
     if adapters_config.get("webhook", {}).get("enabled", False):
         wh_config = adapters_config["webhook"]
-        service.add_adapter(WebhookAdapter(wh_config))
+        service.add_adapter(WebhookAdapter(
+            wh_config,
+            brain=service.brain,
+            context_builder=service.context_builder,
+        ))
 
     stats["adapters"] = len(service.adapters)
     logger.info(f"Starting with {len(service.adapters)} adapters, interval={service.interval}s")
