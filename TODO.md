@@ -119,9 +119,21 @@ Brain is the constant. Adapters, LLM backend, dispatchers are pluggable per envi
 - [ ] T052: Adapter self-message filtering — skip brain's own messages in Teams/Slack/GitHub
 
 ## Phase 13: Self-Reflection Plugin
-- [ ] T053: Hook-runner self-reflection adapter — channel adapter that ingests hook-log.jsonl and self-reflection.jsonl as events. Brain's three-tier memory gives persistent context across sessions. Self-reflection becomes a brain channel instead of standalone claude -p calls.
-- [ ] T054: Reflection analysis action — brain analyzes hook events with full memory context (past sessions, recurring patterns, correction history), returns structured findings. Replaces self-reflection.js's direct claude -p call.
-- [ ] T055: Reflection bridge — hook-runner writes events to bridge dir, brain analyzes, writes findings back. Hook-runner reads findings and enforces via reflection-gate. Clean separation: brain thinks, hook-runner enforces.
+Source: `_grobomo/hook-runner` (v2.10.0) — T331 in hook-runner/TODO.md depends on these.
+Hook-runner has a self-reflection system that calls `claude -p` on every Stop event to review
+gate decisions. It works but has no persistent memory — each call is stateless. The three-tier
+memory in unified-brain solves this. Hook-runner's related TODOs: T330 (scope enforcement),
+T331 (migrate to brain plugin), T332 (lightweight session summaries as interim).
+
+Data files (all in `~/.claude/hooks/`):
+- `hook-log.jsonl` — every hook module invocation (event, module, result, timing)
+- `self-reflection.jsonl` — LLM analysis results (verdict, issues, todos)
+- `reflection-score.json` — gamified score (points, level, streak, intervention counts)
+- `reflection-claude-log.jsonl` — full claude -p audit (prompt, response, timing)
+
+- [ ] T053: Hook-runner channel adapter — ingests hook-log.jsonl + self-reflection.jsonl as events. Brain's three-tier memory gives persistent context across sessions. Self-reflection becomes a brain channel instead of standalone claude -p calls. Adapter polls `~/.claude/hooks/` for new JSONL lines (like Teams adapter polls Graph API).
+- [ ] T054: Reflection analysis action — brain analyzes hook events with full memory context (past sessions, recurring patterns, correction history), returns structured findings via RESPOND action. Replaces self-reflection.js's direct claude -p call with brain's enriched prompt.
+- [ ] T055: Reflection bridge — hook-runner writes events to bridge dir, brain analyzes, writes findings back to `~/.claude/hooks/reflection-findings.json`. Hook-runner reads findings and enforces via reflection-gate. Clean separation: brain thinks, hook-runner enforces.
 
 ## Session Handoff
 PRs #1-31 merged. CI green. 48 tasks done (T001-T048), all phases complete.
