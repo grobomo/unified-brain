@@ -3220,5 +3220,285 @@ class TestHookRunnerAdapter(unittest.TestCase):
         self.assertNotEqual(e1["id"], e2["id"])
 
 
+###############################################################################
+# T054 — ReflectionTask lifecycle
+###############################################################################
+
+from unified_brain.reflection import (
+    BACKOFF_INTERVALS,
+    Checkpoint,
+    Prediction,
+    ReflectionTask,
+    ReflectionTaskStore,
+    TaskState,
+    VALID_TRANSITIONS,
+    compute_prediction_accuracy,
+)
+
+
+class TestReflectionTaskModel(unittest.TestCase):
+    """T054a: ReflectionTask data model — state machine, prediction, checkpoints."""
+
+    def test_default_task_has_id_and_pending_state(self):
+        t = ReflectionTask()
+        self.assertTrue(t.task_id.startswith("refl-"))
+        self.assertEqual(t.state, TaskState.PENDING)
+        self.assertGreater(t.created_at, 0)
+
+    def test_valid_transitions(self):
+        t = ReflectionTask()
+        self.assertTrue(t.can_transition(TaskState.ANALYZING))
+        self.assertFalse(t.can_transition(TaskState.MONITORING))
+
+    def test_full_happy_path_transitions(self):
+        t = ReflectionTask()
+        t.transition(TaskState.ANALYZING)
+        self.assertEqual(t.state, TaskState.ANALYZING)
+        t.transition(TaskState.IMPLEMENTING)
+        self.assertEqual(t.state, TaskState.IMPLEMENTING)
+        t.transition(TaskState.MONITORING)
+        self.assertEqual(t.state, TaskState.MONITORING)
+        t.transition(TaskState.VERIFIED)
+        self.assertEqual(t.state, TaskState.VERIFIED)
+        t.transition(TaskState.CLOSED)
+        self.assertEqual(t.state, TaskState.CLOSED)
+
+    def test_invalid_transition_raises(self):
+        t = ReflectionTask()
+        with self.assertRaises(ValueError):
+            t.transition(TaskState.CLOSED)
+
+    def test_rollback_transition(self):
+        """MONITORING → ROLLED_BACK → ANALYZING."""
+        t = ReflectionTask()
+        t.transition(TaskState.ANALYZING)
+        t.transition(TaskState.IMPLEMENTING)
+        t.transition(TaskState.MONITORING)
+        t.transition(TaskState.ROLLED_BACK)
+        self.assertEqual(t.state, TaskState.ROLLED_BACK)
+        t.transition(TaskState.ANALYZING)
+        self.assertEqual(t.state, TaskState.ANALYZING)
+
+    def test_closed_is_terminal(self):
+        t = ReflectionTask(state=TaskState.CLOSED)
+        self.assertFalse(t.can_transition(TaskState.ANALYZING))
+        self.assertFalse(t.can_transition(TaskState.PENDING))
+
+
+class TestReflectionPrediction(unittest.TestCase):
+    """T054f-g: Prediction model and accuracy comparator."""
+
+    def test_prediction_round_trip(self):
+        p = Prediction(expected_score_delta=5.0, confidence=0.8, reasoning="test")
+        d = p.to_dict()
+        p2 = Prediction.from_dict(d)
+        self.assertEqual(p2.expected_score_delta, 5.0)
+        self.assertEqual(p2.confidence, 0.8)
+        self.assertEqual(p2.reasoning, "test")
+
+    def test_prediction_from_empty_dict(self):
+        p = Prediction.from_dict({})
+        self.assertEqual(p.expected_score_delta, 0.0)
+
+    def test_perfect_prediction_accuracy(self):
+        p = Prediction(expected_score_delta=5.0)
+        acc = compute_prediction_accuracy(p, actual_score_delta=5.0)
+        self.assertAlmostEqual(acc, 1.0)
+
+    def test_completely_wrong_prediction(self):
+        p = Prediction(expected_score_delta=10.0)
+        acc = compute_prediction_accuracy(p, actual_score_delta=-10.0)
+        self.assertAlmostEqual(acc, 0.0)
+
+    def test_partial_accuracy(self):
+        p = Prediction(expected_score_delta=10.0)
+        acc = compute_prediction_accuracy(p, actual_score_delta=5.0)
+        self.assertAlmostEqual(acc, 0.5)
+
+    def test_no_prediction_returns_zero(self):
+        acc = compute_prediction_accuracy(None, actual_score_delta=5.0)
+        self.assertEqual(acc, 0.0)
+
+    def test_combined_score_and_block_rate_accuracy(self):
+        p = Prediction(expected_score_delta=10.0, expected_block_rate_change=-0.5)
+        # Perfect score delta, partial block rate
+        acc = compute_prediction_accuracy(p, actual_score_delta=10.0,
+                                          actual_block_rate_change=-0.25)
+        self.assertGreater(acc, 0.5)
+        self.assertLess(acc, 1.0)
+
+
+class TestReflectionBackoff(unittest.TestCase):
+    """T054e: Exponential backoff scheduler."""
+
+    def test_backoff_intervals(self):
+        t = ReflectionTask()
+        self.assertEqual(t.next_check_delay, 30)
+        t.backoff_index = 1
+        self.assertEqual(t.next_check_delay, 60)
+        t.backoff_index = 4
+        self.assertEqual(t.next_check_delay, 1800)
+
+    def test_beyond_max_backoff_uses_last(self):
+        t = ReflectionTask(backoff_index=99)
+        self.assertEqual(t.next_check_delay, BACKOFF_INTERVALS[-1])
+
+    def test_advance_backoff(self):
+        t = ReflectionTask()
+        t.advance_backoff()
+        self.assertEqual(t.backoff_index, 1)
+        for _ in range(10):
+            t.advance_backoff()
+        self.assertEqual(t.backoff_index, len(BACKOFF_INTERVALS) - 1)
+
+    def test_is_final_check(self):
+        t = ReflectionTask()
+        self.assertFalse(t.is_final_check)
+        t.backoff_index = len(BACKOFF_INTERVALS) - 1
+        self.assertTrue(t.is_final_check)
+
+    def test_is_due_for_check_only_in_monitoring(self):
+        t = ReflectionTask()
+        self.assertFalse(t.is_due_for_check)  # PENDING
+        t.state = TaskState.MONITORING
+        t.implemented_at = time.time() - 60  # 60s ago
+        self.assertTrue(t.is_due_for_check)  # 30s backoff elapsed
+
+    def test_is_not_due_if_recently_implemented(self):
+        t = ReflectionTask(state=TaskState.MONITORING)
+        t.implemented_at = time.time()  # just now
+        self.assertFalse(t.is_due_for_check)
+
+
+class TestReflectionRetry(unittest.TestCase):
+    """T054d,h: Rollback + retry with max attempts."""
+
+    def test_reset_for_retry(self):
+        t = ReflectionTask(
+            prediction=Prediction(expected_score_delta=5.0),
+            backup_content="original",
+            implemented_at=time.time(),
+            backoff_index=3,
+        )
+        t.add_checkpoint(100, 0.5, "rolled_back")
+        t.reset_for_retry()
+        self.assertEqual(t.attempts, 1)
+        self.assertEqual(t.backoff_index, 0)
+        self.assertEqual(t.monitor_checkpoints, [])
+        self.assertEqual(t.implemented_at, 0.0)
+        self.assertIsNone(t.prediction)
+
+    def test_exceeds_max_attempts(self):
+        t = ReflectionTask(max_attempts=3)
+        self.assertFalse(t.exceeds_max_attempts())
+        t.attempts = 3
+        self.assertTrue(t.exceeds_max_attempts())
+
+    def test_checkpoint_recording(self):
+        t = ReflectionTask()
+        cp = t.add_checkpoint(100.0, 0.8, "advancing", "looks good")
+        self.assertEqual(len(t.monitor_checkpoints), 1)
+        self.assertEqual(cp.score, 100.0)
+        self.assertEqual(cp.prediction_accuracy, 0.8)
+        self.assertEqual(cp.result, "advancing")
+
+
+class TestReflectionTaskStore(unittest.TestCase):
+    """T054b: SQLite persistence for ReflectionTasks."""
+
+    def setUp(self):
+        self.conn = sqlite3.connect(":memory:")
+        self.conn.row_factory = sqlite3.Row
+        self.store = ReflectionTaskStore(self.conn)
+
+    def tearDown(self):
+        self.conn.close()
+
+    def test_save_and_get(self):
+        t = ReflectionTask(diagnosis="test issue", target_file="spec-gate.js")
+        self.store.save(t)
+        loaded = self.store.get(t.task_id)
+        self.assertIsNotNone(loaded)
+        self.assertEqual(loaded.diagnosis, "test issue")
+        self.assertEqual(loaded.target_file, "spec-gate.js")
+        self.assertEqual(loaded.state, TaskState.PENDING)
+
+    def test_save_with_prediction(self):
+        t = ReflectionTask(
+            prediction=Prediction(expected_score_delta=5.0, confidence=0.9),
+        )
+        self.store.save(t)
+        loaded = self.store.get(t.task_id)
+        self.assertIsNotNone(loaded.prediction)
+        self.assertEqual(loaded.prediction.expected_score_delta, 5.0)
+        self.assertEqual(loaded.prediction.confidence, 0.9)
+
+    def test_save_with_checkpoints(self):
+        t = ReflectionTask()
+        t.add_checkpoint(100.0, 0.8, "advancing")
+        t.add_checkpoint(105.0, 0.9, "advancing")
+        self.store.save(t)
+        loaded = self.store.get(t.task_id)
+        self.assertEqual(len(loaded.monitor_checkpoints), 2)
+        self.assertEqual(loaded.monitor_checkpoints[0].score, 100.0)
+        self.assertEqual(loaded.monitor_checkpoints[1].score, 105.0)
+
+    def test_update_state(self):
+        t = ReflectionTask()
+        self.store.save(t)
+        t.transition(TaskState.ANALYZING)
+        self.store.save(t)
+        loaded = self.store.get(t.task_id)
+        self.assertEqual(loaded.state, TaskState.ANALYZING)
+
+    def test_list_by_state(self):
+        t1 = ReflectionTask(diagnosis="a")
+        t2 = ReflectionTask(diagnosis="b")
+        t2.transition(TaskState.ANALYZING)
+        self.store.save(t1)
+        self.store.save(t2)
+        pending = self.store.list_by_state(TaskState.PENDING)
+        self.assertEqual(len(pending), 1)
+        self.assertEqual(pending[0].diagnosis, "a")
+
+    def test_list_active(self):
+        t1 = ReflectionTask(diagnosis="active")
+        t2 = ReflectionTask(diagnosis="closed", state=TaskState.CLOSED)
+        self.store.save(t1)
+        self.store.save(t2)
+        active = self.store.list_active()
+        self.assertEqual(len(active), 1)
+        self.assertEqual(active[0].diagnosis, "active")
+
+    def test_list_monitoring(self):
+        t = ReflectionTask()
+        t.state = TaskState.MONITORING
+        t.implemented_at = time.time()
+        self.store.save(t)
+        monitoring = self.store.list_monitoring()
+        self.assertEqual(len(monitoring), 1)
+
+    def test_list_due_for_check(self):
+        t = ReflectionTask()
+        t.state = TaskState.MONITORING
+        t.implemented_at = time.time() - 60  # 60s ago, past 30s backoff
+        self.store.save(t)
+        due = self.store.list_due_for_check()
+        self.assertEqual(len(due), 1)
+
+    def test_get_missing_returns_none(self):
+        self.assertIsNone(self.store.get("nonexistent"))
+
+    def test_count_by_state(self):
+        self.store.save(ReflectionTask())
+        self.store.save(ReflectionTask())
+        t3 = ReflectionTask()
+        t3.transition(TaskState.ANALYZING)
+        self.store.save(t3)
+        counts = self.store.count_by_state()
+        self.assertEqual(counts.get("pending"), 2)
+        self.assertEqual(counts.get("analyzing"), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

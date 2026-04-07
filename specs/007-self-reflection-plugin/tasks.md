@@ -8,16 +8,16 @@
 - [x] T053e: Graceful handling of missing/rotated files
 - [x] T053f: Tests for adapter (11 tests)
 
-## T054: ReflectionTask lifecycle manager
-- [ ] T054a: ReflectionTask data model (state machine, prediction, checkpoints, backup)
-- [ ] T054b: ReflectionTaskStore (SQLite table alongside EventStore)
-- [ ] T054c: State transitions: PENDING → ANALYZING → IMPLEMENTING → MONITORING → VERIFIED → CLOSED
-- [ ] T054d: Rollback state: MONITORING → ROLLED_BACK → ANALYZING (on score drop OR prediction mismatch)
-- [ ] T054e: Exponential backoff scheduler (30s, 1m, 5m, 15m, 30m checkpoints)
-- [ ] T054f: Prediction model — structured prediction before each change (expected delta, confidence, reasoning, timeframe)
-- [ ] T054g: Prediction-outcome comparator — accuracy score, match/mismatch detection
-- [ ] T054h: Max attempts cap (default 3) to prevent infinite loops
-- [ ] T054i: Tests for lifecycle (state transitions, backoff, rollback, prediction matching)
+## T054: ReflectionTask lifecycle manager (DONE)
+- [x] T054a: ReflectionTask data model (state machine, prediction, checkpoints, backup)
+- [x] T054b: ReflectionTaskStore (SQLite table alongside EventStore)
+- [x] T054c: State transitions: PENDING → ANALYZING → IMPLEMENTING → MONITORING → VERIFIED → CLOSED
+- [x] T054d: Rollback state: MONITORING → ROLLED_BACK → ANALYZING (on score drop OR prediction mismatch)
+- [x] T054e: Exponential backoff scheduler (30s, 1m, 5m, 15m, 30m checkpoints)
+- [x] T054f: Prediction model — structured prediction before each change (expected delta, confidence, reasoning, timeframe)
+- [x] T054g: Prediction-outcome comparator — accuracy score, match/mismatch detection
+- [x] T054h: Max attempts cap (default 3) to prevent infinite loops
+- [x] T054i: Tests for lifecycle (32 tests: state transitions, backoff, rollback, prediction matching, store CRUD)
 
 ## T055: Reflection implementer
 - [ ] T055a: File backup + edit for hook-runner JS modules

@@ -132,23 +132,14 @@ Data files (all in `~/.claude/hooks/`):
 - `reflection-claude-log.jsonl` — full claude -p audit (prompt, response, timing)
 
 - [x] T053: Hook-runner channel adapter — ingests hook-log.jsonl + self-reflection.jsonl as events
-- [ ] T054: ReflectionTask lifecycle — state machine (detect → predict → implement → monitor → verify → close), exponential backoff (30s→30m), rollback on prediction mismatch, max 3 attempts
+- [x] T054: ReflectionTask lifecycle — state machine (detect → predict → implement → monitor → verify → close), exponential backoff (30s→30m), rollback on prediction mismatch, max 3 attempts
 - [ ] T055: Reflection implementer — file backup/edit/rollback for hook modules, brain prompt enrichment with prediction history, per-module calibration in Tier 2 memory
 - [ ] T056: Brain-owned score — prediction accuracy (70%) + user interrupt rate (30%), rolling tracker, score persistence, Prometheus metrics, reflection-findings.json bridge
 
 ## Session Handoff
-PRs #1-32 merged/open. 52 tasks done (T001-T052), spec 006 complete.
+PRs #1-32 merged/open. 54 tasks done (T001-T054), spec 007 in progress.
 - SERVICE IS LIVE locally: interval=3s, health on :8790, all adapters connected
-- Architecture: pluggable adapters (GitHub, Teams, Slack, Webhook), LLM backend (subprocess/api), dispatcher transport (file/SQS), active respond
-- 601+ events in store, 171 tests passing, zero external deps for core
-- Interactive chat: CLI REPL, REST /chat, WebSocket /ws/chat — per-user sessions in group chats
-- Persona system: per-user brain identity (name+emoji), self-message filtering in all adapters
-- LLM observability: data/llm.jsonl audit trail, 13 Prometheus metric series
-- Feedback loop: tracks dispatch/respond outcomes, feeds success/failure patterns to brain
-- Docker Compose: one-command startup with brain + Prometheus + Grafana
-- Deployment artifacts: Dockerfile, K8s manifests (kustomize), CloudFormation (EC2 spot + SQS)
-- PR #32 open: T049-T052 (interactive chat, personas, LLM logging, adapter filtering)
-- PR #32 open: T049-T052 (interactive chat, personas, LLM logging, adapter filtering)
-- Branch 033-T053-hook-runner-adapter: T053 done + spec 007 v2 (closed-loop self-improvement), needs PR
-- Next: T054 (ReflectionTask lifecycle), then T055 (implementer), T056 (brain-owned score)
-- Spec 007 redesigned: brain predicts outcome before changes, prediction accuracy = primary score (70%)
+- 215 tests passing, zero external deps for core
+- Branch 033-T053-hook-runner-adapter: T053 + T054 done, spec 007 v2 (closed-loop self-improvement)
+- T054: reflection.py — ReflectionTask data model, state machine, Prediction, ReflectionTaskStore (SQLite), 32 tests
+- Next: T055 (reflection implementer — file edit/rollback, brain prompt enrichment, service loop wiring)
